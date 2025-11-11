@@ -1,0 +1,107 @@
+You are an expert React/TypeScript engineer. Your task is to build a proof-of-concept (POC) UI using React and shadcn/ui components to interact with the Minzibar access control service. The UI should allow users to create resources, subjects, relations, policies, attach policies, and verify access, providing a clear and testable interface for all major features.
+
+## Context
+
+Minzibar is a flexible access control system combining a relationship graph and policy rules. It exposes a REST API via an Echo server. The backend supports granular permissions (via relation tuples) and business logic (via policies), and can evaluate access requests using both.
+
+### Key Concepts
+
+- **Resource**: An entity like a document, feature flag, etc. (`type` and `id`)
+- **Subject**: A user, group, or team (`type`, `id`, and optional `relation`)
+- **Relation**: A tuple connecting resource, relation/action, and subject
+- **Policy**: Business logic rules, e.g. `allow read if user.department == "engineering"`
+- **Policy Attachment**: Policies are attached to resources
+- **Verification**: Check if a subject can perform an action on a resource, given context
+
+### Supported Policy DSL Features
+
+- Comparison: `==`, `!=`
+- Logical: `and`, `or`, `not`
+- Functions: `contains(identifier, value)`, `all(identifier, value)`
+- Wildcard actions: `allow * if ...`
+- Context keys: arbitrary strings, e.g. `user.department`, `role`, etc.
+
+## API Endpoints
+
+All endpoints accept/return JSON.
+
+1. **POST /resource**
+   - Create a resource.
+   - Body: `{ "type": string, "id": string }`
+   - Response: `{ "Type": string, "ObjectID": string }`
+
+2. **POST /relation**
+   - Add relation(s) via query string.
+   - Body: `{ "query": string }`
+   - Example query: `document:doc123 user:alice->read,write`
+
+3. **POST /policy**
+   - Add/register a policy.
+   - Body: `{ "policy_id": string, "policy_text": string }`
+
+4. **POST /policy/attach**
+   - Attach a policy to a resource.
+   - Body: `{ "resource_type": string, "resource_id": string, "policy_id": string }`
+
+5. **POST /verify**
+   - Verify access.
+   - Body:
+     ```
+     {
+       "resource_type": string,
+       "resource_id": string,
+       "subject_type": string,
+       "subject_id": string,
+       "action": string,
+       "context": { [key: string]: string }
+     }
+     ```
+   - Response: `{ "allowed": boolean }`
+
+6. **GET /objects**
+   - List all resources.
+   - Response: array of `{ "Type": string, "ObjectID": string }`
+
+## UI Requirements
+
+Build a React UI (TypeScript) using shadcn/ui components that enables:
+
+1. **Resource Management**
+   - Create resources (type/id)
+   - List all resources
+
+2. **Subject Management**
+   - Create subjects (type/id/relation)
+   - List subjects (if possible, or allow manual entry for testing)
+
+3. **Relation Management**
+   - Add relations using the query format (see above)
+   - Show relations for a resource (if possible)
+
+4. **Policy Management**
+   - Add policies (policy_id, policy_text)
+   - Attach policies to resources
+   - List policies attached to a resource (if possible)
+
+5. **Access Verification**
+   - Form to verify access: select resource, subject, action, and provide context key-value pairs
+   - Display result (allowed/denied)
+
+6. **Testing Policy DSL**
+   - Allow entering custom policy text, including all supported operators and functions (`==`, `!=`, `and`, `or`, `not`, `contains()`, `all()`)
+
+7. **UX**
+   - Provide clear error/success messages from API responses.
+   - Make it easy to test all features without needing to know backend details.
+
+## Additional Notes
+
+- The backend does not auto-generate subject IDs; you must provide them.
+- Context for verification is a key-value map (e.g., `{ "user.department": "engineering", "role": "contractor" }`).
+- Relations and policies are attached to resources; actions are represented as the relation value.
+- The UI should be modular and easy to extend for future endpoints (e.g., policy listing, audit logs).
+- No authentication is required for the POC.
+
+## Deliverable
+
+A single React app (TypeScript) using shadcn/ui, with all code in one repo. The UI should make it easy to exercise all major Minzibar features and test policy logic interactively.

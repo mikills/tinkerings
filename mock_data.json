@@ -1,0 +1,29 @@
+{
+  "feature_flag": {
+    "type": "feature_flag",
+    "id": "new-dashboard"
+  },
+  "users": [
+    {"type": "user", "id": "user1", "department": "CTO"},
+    {"type": "user", "id": "user2", "department": "CTO"},
+    {"type": "user", "id": "user3", "department": "CTO"},
+    {"type": "user", "id": "user4", "department": "CTO"},
+    {"type": "user", "id": "user5", "department": "CTO"},
+    {"type": "user", "id": "user6", "department": "Engineering"},
+    {"type": "user", "id": "user7", "department": "Engineering"},
+    {"type": "user", "id": "user8", "department": "Engineering"},
+    {"type": "user", "id": "user9", "department": "Engineering"},
+    {"type": "user", "id": "user10", "department": "Engineering"}
+  ],
+  "relations": [
+    {"resource_type": "feature_flag", "resource_id": "new-dashboard", "relation": "enabled", "subject_type": "user", "subject_id": "user1"},
+    {"resource_type": "feature_flag", "resource_id": "new-dashboard", "relation": "enabled", "subject_type": "user", "subject_id": "user2"},
+    {"resource_type": "feature_flag", "resource_id": "new-dashboard", "relation": "enabled", "subject_type": "user", "subject_id": "user3"},
+    {"resource_type": "feature_flag", "resource_id": "new-dashboard", "relation": "enabled", "subject_type": "user", "subject_id": "user4"},
+    {"resource_type": "feature_flag", "resource_id": "new-dashboard", "relation": "enabled", "subject_type": "user", "subject_id": "user5"}
+  ],
+  "policy": {
+    "policy_id": "p_cto_only",
+    "policy_text": "allow enabled if department == \"CTO\""
+  }
+}
