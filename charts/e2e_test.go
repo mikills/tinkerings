@@ -111,31 +111,35 @@ func TestMCPServerIntegration(t *testing.T) {
 		result := resp["result"].(map[string]any)
 		tools := result["tools"].([]any)
 
-		if len(tools) != 2 {
-			t.Errorf("expected 2 tools, got %d", len(tools))
+		if len(tools) != 9 {
+			t.Errorf("expected 9 tools, got %d", len(tools))
 		}
 
-		// verify bar chart tool exists
-		foundBar := false
-		foundLine := false
+		// verify all chart tools exist
+		expectedTools := []string{
+			"area-chart-generator",
+			"bar-chart-generator",
+			"doughnut-chart-generator",
+			"line-chart-generator",
+			"pie-chart-generator",
+			"polar-area-chart-generator",
+			"radar-chart-generator",
+			"scatter-chart-generator",
+			"sequence-diagram-generator",
+		}
+
+		foundTools := make(map[string]bool)
 		for _, tool := range tools {
 			toolMap := tool.(map[string]any)
 			name := toolMap["name"].(string)
-			if name == "bar-chart-generator" {
-				foundBar = true
-				t.Logf("Found tool: %s - %s", name, toolMap["description"])
-			}
-			if name == "line-chart-generator" {
-				foundLine = true
-				t.Logf("Found tool: %s - %s", name, toolMap["description"])
-			}
+			foundTools[name] = true
+			t.Logf("Found tool: %s - %s", name, toolMap["description"])
 		}
 
-		if !foundBar {
-			t.Error("bar-chart-generator tool not found")
-		}
-		if !foundLine {
-			t.Error("line-chart-generator tool not found")
+		for _, expected := range expectedTools {
+			if !foundTools[expected] {
+				t.Errorf("%s tool not found", expected)
+			}
 		}
 	})
 
@@ -298,6 +302,405 @@ func TestMCPServerIntegration(t *testing.T) {
 		}
 
 		t.Logf("Correctly rejected invalid arguments")
+	})
+
+	t.Run("call area chart tool", func(t *testing.T) {
+		req := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      6,
+			"method":  "tools/call",
+			"params": map[string]any{
+				"name": "area-chart-generator",
+				"arguments": map[string]any{
+					"title":        "Temperature",
+					"datasetLabel": "Celsius",
+					"points": []map[string]any{
+						{"x": "Mon", "y": 20},
+						{"x": "Tue", "y": 22},
+					},
+				},
+			},
+		}
+
+		if err := sendRequest(stdin, req); err != nil {
+			t.Fatalf("failed to send tools/call: %v", err)
+		}
+
+		resp, err := readResponse(reader)
+		if err != nil {
+			t.Fatalf("failed to read tools/call response: %v", err)
+		}
+
+		if resp["error"] != nil {
+			t.Fatalf("tools/call returned error: %v", resp["error"])
+		}
+
+		result := resp["result"].(map[string]any)
+		content := result["content"].([]any)
+		contentItem := content[0].(map[string]any)
+		textContent := contentItem["text"].(string)
+
+		var chartJSON map[string]any
+		if err := json.Unmarshal([]byte(textContent), &chartJSON); err != nil {
+			t.Fatalf("failed to parse chart JSON: %v", err)
+		}
+
+		if chartJSON["type"] != "line" {
+			t.Errorf("expected type=line, got %v", chartJSON["type"])
+		}
+
+		// verify fill is enabled for area chart
+		data := chartJSON["data"].(map[string]any)
+		datasets := data["datasets"].([]any)
+		dataset := datasets[0].(map[string]any)
+		if dataset["fill"] != true {
+			t.Error("expected fill=true for area chart")
+		}
+
+		t.Logf("Successfully generated area chart")
+	})
+
+	t.Run("call doughnut chart tool", func(t *testing.T) {
+		req := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      7,
+			"method":  "tools/call",
+			"params": map[string]any{
+				"name": "doughnut-chart-generator",
+				"arguments": map[string]any{
+					"title":        "Market Share",
+					"datasetLabel": "Products",
+					"points": []map[string]any{
+						{"label": "Product A", "value": 300},
+						{"label": "Product B", "value": 50},
+						{"label": "Product C", "value": 100},
+					},
+				},
+			},
+		}
+
+		if err := sendRequest(stdin, req); err != nil {
+			t.Fatalf("failed to send tools/call: %v", err)
+		}
+
+		resp, err := readResponse(reader)
+		if err != nil {
+			t.Fatalf("failed to read tools/call response: %v", err)
+		}
+
+		if resp["error"] != nil {
+			t.Fatalf("tools/call returned error: %v", resp["error"])
+		}
+
+		result := resp["result"].(map[string]any)
+		content := result["content"].([]any)
+		contentItem := content[0].(map[string]any)
+		textContent := contentItem["text"].(string)
+
+		var chartJSON map[string]any
+		if err := json.Unmarshal([]byte(textContent), &chartJSON); err != nil {
+			t.Fatalf("failed to parse chart JSON: %v", err)
+		}
+
+		if chartJSON["type"] != "doughnut" {
+			t.Errorf("expected type=doughnut, got %v", chartJSON["type"])
+		}
+
+		t.Logf("Successfully generated doughnut chart")
+	})
+
+	t.Run("call pie chart tool", func(t *testing.T) {
+		req := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      8,
+			"method":  "tools/call",
+			"params": map[string]any{
+				"name": "pie-chart-generator",
+				"arguments": map[string]any{
+					"title":        "Sales Distribution",
+					"datasetLabel": "Revenue",
+					"points": []map[string]any{
+						{"label": "Q1", "value": 1000},
+						{"label": "Q2", "value": 1500},
+					},
+				},
+			},
+		}
+
+		if err := sendRequest(stdin, req); err != nil {
+			t.Fatalf("failed to send tools/call: %v", err)
+		}
+
+		resp, err := readResponse(reader)
+		if err != nil {
+			t.Fatalf("failed to read tools/call response: %v", err)
+		}
+
+		if resp["error"] != nil {
+			t.Fatalf("tools/call returned error: %v", resp["error"])
+		}
+
+		result := resp["result"].(map[string]any)
+		content := result["content"].([]any)
+		contentItem := content[0].(map[string]any)
+		textContent := contentItem["text"].(string)
+
+		var chartJSON map[string]any
+		if err := json.Unmarshal([]byte(textContent), &chartJSON); err != nil {
+			t.Fatalf("failed to parse chart JSON: %v", err)
+		}
+
+		if chartJSON["type"] != "pie" {
+			t.Errorf("expected type=pie, got %v", chartJSON["type"])
+		}
+
+		t.Logf("Successfully generated pie chart")
+	})
+
+	t.Run("call polar area chart tool", func(t *testing.T) {
+		req := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      9,
+			"method":  "tools/call",
+			"params": map[string]any{
+				"name": "polar-area-chart-generator",
+				"arguments": map[string]any{
+					"title":        "Performance Metrics",
+					"datasetLabel": "Scores",
+					"points": []map[string]any{
+						{"label": "Speed", "value": 11},
+						{"label": "Efficiency", "value": 16},
+						{"label": "Quality", "value": 7},
+					},
+				},
+			},
+		}
+
+		if err := sendRequest(stdin, req); err != nil {
+			t.Fatalf("failed to send tools/call: %v", err)
+		}
+
+		resp, err := readResponse(reader)
+		if err != nil {
+			t.Fatalf("failed to read tools/call response: %v", err)
+		}
+
+		if resp["error"] != nil {
+			t.Fatalf("tools/call returned error: %v", resp["error"])
+		}
+
+		result := resp["result"].(map[string]any)
+		content := result["content"].([]any)
+		contentItem := content[0].(map[string]any)
+		textContent := contentItem["text"].(string)
+
+		var chartJSON map[string]any
+		if err := json.Unmarshal([]byte(textContent), &chartJSON); err != nil {
+			t.Fatalf("failed to parse chart JSON: %v", err)
+		}
+
+		if chartJSON["type"] != "polarArea" {
+			t.Errorf("expected type=polarArea, got %v", chartJSON["type"])
+		}
+
+		t.Logf("Successfully generated polar area chart")
+	})
+
+	t.Run("call radar chart tool", func(t *testing.T) {
+		req := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      10,
+			"method":  "tools/call",
+			"params": map[string]any{
+				"name": "radar-chart-generator",
+				"arguments": map[string]any{
+					"title":        "Skills Assessment",
+					"datasetLabel": "Employee A",
+					"points": []map[string]any{
+						{"label": "Communication", "value": 65},
+						{"label": "Teamwork", "value": 59},
+						{"label": "Technical", "value": 90},
+					},
+				},
+			},
+		}
+
+		if err := sendRequest(stdin, req); err != nil {
+			t.Fatalf("failed to send tools/call: %v", err)
+		}
+
+		resp, err := readResponse(reader)
+		if err != nil {
+			t.Fatalf("failed to read tools/call response: %v", err)
+		}
+
+		if resp["error"] != nil {
+			t.Fatalf("tools/call returned error: %v", resp["error"])
+		}
+
+		result := resp["result"].(map[string]any)
+		content := result["content"].([]any)
+		contentItem := content[0].(map[string]any)
+		textContent := contentItem["text"].(string)
+
+		var chartJSON map[string]any
+		if err := json.Unmarshal([]byte(textContent), &chartJSON); err != nil {
+			t.Fatalf("failed to parse chart JSON: %v", err)
+		}
+
+		if chartJSON["type"] != "radar" {
+			t.Errorf("expected type=radar, got %v", chartJSON["type"])
+		}
+
+		t.Logf("Successfully generated radar chart")
+	})
+
+	t.Run("call scatter chart tool", func(t *testing.T) {
+		req := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      11,
+			"method":  "tools/call",
+			"params": map[string]any{
+				"name": "scatter-chart-generator",
+				"arguments": map[string]any{
+					"title":        "Correlation Analysis",
+					"datasetLabel": "Data Points",
+					"points": []map[string]any{
+						{"x": -10, "y": 0},
+						{"x": 0, "y": 10},
+						{"x": 10, "y": 5},
+					},
+				},
+			},
+		}
+
+		if err := sendRequest(stdin, req); err != nil {
+			t.Fatalf("failed to send tools/call: %v", err)
+		}
+
+		resp, err := readResponse(reader)
+		if err != nil {
+			t.Fatalf("failed to read tools/call response: %v", err)
+		}
+
+		if resp["error"] != nil {
+			t.Fatalf("tools/call returned error: %v", resp["error"])
+		}
+
+		result := resp["result"].(map[string]any)
+		content := result["content"].([]any)
+		contentItem := content[0].(map[string]any)
+		textContent := contentItem["text"].(string)
+
+		var chartJSON map[string]any
+		if err := json.Unmarshal([]byte(textContent), &chartJSON); err != nil {
+			t.Fatalf("failed to parse chart JSON: %v", err)
+		}
+
+		if chartJSON["type"] != "scatter" {
+			t.Errorf("expected type=scatter, got %v", chartJSON["type"])
+		}
+
+		// verify scatter-specific data structure
+		data := chartJSON["data"].(map[string]any)
+		datasets := data["datasets"].([]any)
+		dataset := datasets[0].(map[string]any)
+		dataPoints := dataset["data"].([]any)
+		firstPoint := dataPoints[0].(map[string]any)
+		if firstPoint["x"] != float64(-10) || firstPoint["y"] != float64(0) {
+			t.Errorf("unexpected scatter point structure: %v", firstPoint)
+		}
+
+		t.Logf("Successfully generated scatter chart")
+	})
+
+	t.Run("call sequence diagram tool", func(t *testing.T) {
+		req := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      12,
+			"method":  "tools/call",
+			"params": map[string]any{
+				"name": "sequence-diagram-generator",
+				"arguments": map[string]any{
+					"title":      "API Authentication Flow",
+					"autoNumber": true,
+					"participants": []map[string]any{
+						{"id": "Client", "type": "actor"},
+						{"id": "API", "type": "participant"},
+						{"id": "DB", "type": "database"},
+					},
+					"messages": []map[string]any{
+						{"from": "Client", "to": "API", "text": "POST /login", "activate": true},
+						{"from": "API", "to": "DB", "text": "Query user", "arrowType": "->>"},
+						{"from": "DB", "to": "API", "text": "User data", "arrowType": "-->>"},
+						{"from": "API", "to": "Client", "text": "JWT token", "deactivate": true},
+					},
+					"notes": []map[string]any{
+						{"position": "right of", "participants": []string{"Client"}, "text": "User enters credentials"},
+						{"position": "over", "participants": []string{"API", "DB"}, "text": "Authentication logic"},
+					},
+				},
+			},
+		}
+
+		if err := sendRequest(stdin, req); err != nil {
+			t.Fatalf("failed to send tools/call: %v", err)
+		}
+
+		resp, err := readResponse(reader)
+		if err != nil {
+			t.Fatalf("failed to read tools/call response: %v", err)
+		}
+
+		if resp["error"] != nil {
+			t.Fatalf("tools/call returned error: %v", resp["error"])
+		}
+
+		result := resp["result"].(map[string]any)
+		content := result["content"].([]any)
+		contentItem := content[0].(map[string]any)
+
+		if contentItem["type"] != "text" {
+			t.Errorf("expected content type=text, got %v", contentItem["type"])
+		}
+
+		dslText := contentItem["text"].(string)
+
+		// verify mermaid DSL structure
+		if len(dslText) == 0 {
+			t.Fatal("DSL text is empty")
+		}
+
+		// check for essential mermaid elements
+		requiredElements := []string{
+			"sequenceDiagram",
+			"title: API Authentication Flow",
+			"autonumber",
+			"actor Client",
+			"participant API",
+			"database DB",
+			"Client->>+API: POST /login",
+			"API->>DB: Query user",
+			"DB-->>API: User data",
+			"API->>-Client: JWT token",
+			"Note right of Client: User enters credentials",
+			"Note over API,DB: Authentication logic",
+		}
+
+		for _, elem := range requiredElements {
+			found := false
+			for i := 0; i <= len(dslText)-len(elem); i++ {
+				if dslText[i:i+len(elem)] == elem {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("DSL missing required element: %s\nGenerated DSL:\n%s", elem, dslText)
+			}
+		}
+
+		t.Logf("Successfully generated sequence diagram DSL:\n%s", dslText)
 	})
 }
 

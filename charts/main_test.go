@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -259,6 +261,84 @@ func TestChartJSONStructure(t *testing.T) {
 			},
 			chartType: "line",
 		},
+		{
+			name: "area chart structure",
+			generator: func() map[string]any {
+				return generateAreaChartJSON(AreaChartArgs{
+					Title:        "Test Chart",
+					DatasetLabel: "Test Data",
+					Points: []AreaPoint{
+						{X: "A", Y: 100},
+					},
+				})
+			},
+			chartType: "line",
+		},
+		{
+			name: "doughnut chart structure",
+			generator: func() map[string]any {
+				return generateDoughnutChartJSON(DoughnutChartArgs{
+					Title:        "Test Chart",
+					DatasetLabel: "Test Data",
+					Points: []DoughnutPoint{
+						{Label: "A", Value: 100},
+					},
+				})
+			},
+			chartType: "doughnut",
+		},
+		{
+			name: "pie chart structure",
+			generator: func() map[string]any {
+				return generatePieChartJSON(PieChartArgs{
+					Title:        "Test Chart",
+					DatasetLabel: "Test Data",
+					Points: []PiePoint{
+						{Label: "A", Value: 100},
+					},
+				})
+			},
+			chartType: "pie",
+		},
+		{
+			name: "polar area chart structure",
+			generator: func() map[string]any {
+				return generatePolarAreaChartJSON(PolarAreaChartArgs{
+					Title:        "Test Chart",
+					DatasetLabel: "Test Data",
+					Points: []PolarAreaPoint{
+						{Label: "A", Value: 100},
+					},
+				})
+			},
+			chartType: "polarArea",
+		},
+		{
+			name: "radar chart structure",
+			generator: func() map[string]any {
+				return generateRadarChartJSON(RadarChartArgs{
+					Title:        "Test Chart",
+					DatasetLabel: "Test Data",
+					Points: []RadarPoint{
+						{Label: "A", Value: 100},
+					},
+				})
+			},
+			chartType: "radar",
+		},
+		{
+			name: "scatter chart structure",
+			generator: func() map[string]any {
+				return generateScatterChartJSON(ScatterChartArgs{
+					Title:        "Test Chart",
+					DatasetLabel: "Test Data",
+					Points: []ScatterPoint{
+						{X: 10, Y: 100},
+					},
+				})
+			},
+			chartType: "scatter",
+		},
 	}
 
 	for _, tt := range tests {
@@ -280,8 +360,11 @@ func TestChartJSONStructure(t *testing.T) {
 
 			// check data structure
 			data := result["data"].(map[string]any)
-			if _, ok := data["labels"]; !ok {
-				t.Error("missing data.labels")
+			// scatter charts don't have labels, they use direct x,y coordinates
+			if tt.chartType != "scatter" {
+				if _, ok := data["labels"]; !ok {
+					t.Error("missing data.labels")
+				}
 			}
 			if _, ok := data["datasets"]; !ok {
 				t.Error("missing data.datasets")
@@ -306,15 +389,498 @@ func TestChartJSONStructure(t *testing.T) {
 			if _, ok := options["plugins"]; !ok {
 				t.Error("missing options.plugins")
 			}
-			if _, ok := options["scales"]; !ok {
-				t.Error("missing options.scales")
-			}
 
-			// verify scales.y.beginAtZero
-			scales := options["scales"].(map[string]any)
-			y := scales["y"].(map[string]any)
-			if beginAtZero, ok := y["beginAtZero"]; !ok || beginAtZero != true {
-				t.Error("missing or invalid scales.y.beginAtZero")
+			// verify scales based on chart type
+			if tt.chartType == "bar" || tt.chartType == "line" {
+				if _, ok := options["scales"]; !ok {
+					t.Error("missing options.scales")
+				}
+				scales := options["scales"].(map[string]any)
+				y := scales["y"].(map[string]any)
+				if beginAtZero, ok := y["beginAtZero"]; !ok || beginAtZero != true {
+					t.Error("missing or invalid scales.y.beginAtZero")
+				}
+			} else if tt.chartType == "radar" {
+				if _, ok := options["scales"]; !ok {
+					t.Error("missing options.scales for radar chart")
+				}
+				scales := options["scales"].(map[string]any)
+				r := scales["r"].(map[string]any)
+				if beginAtZero, ok := r["beginAtZero"]; !ok || beginAtZero != true {
+					t.Error("missing or invalid scales.r.beginAtZero")
+				}
+			} else if tt.chartType == "scatter" {
+				if _, ok := options["scales"]; !ok {
+					t.Error("missing options.scales for scatter chart")
+				}
+				scales := options["scales"].(map[string]any)
+				x := scales["x"].(map[string]any)
+				y := scales["y"].(map[string]any)
+				if x["type"] != "linear" {
+					t.Error("missing or invalid scales.x.type for scatter chart")
+				}
+				if beginAtZero, ok := y["beginAtZero"]; !ok || beginAtZero != true {
+					t.Error("missing or invalid scales.y.beginAtZero for scatter chart")
+				}
+			}
+		})
+	}
+}
+
+func TestGenerateAreaChartJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     AreaChartArgs
+		validate func(t *testing.T, result map[string]any)
+	}{
+		{
+			name: "basic area chart",
+			args: AreaChartArgs{
+				Title:        "Temperature Over Time",
+				DatasetLabel: "Celsius",
+				Points: []AreaPoint{
+					{X: "Mon", Y: 20},
+					{X: "Tue", Y: 22},
+					{X: "Wed", Y: 19},
+				},
+			},
+			validate: func(t *testing.T, result map[string]any) {
+				if result["type"] != "line" {
+					t.Errorf("expected type=line, got %v", result["type"])
+				}
+
+				data := result["data"].(map[string]any)
+				datasets := data["datasets"].([]map[string]any)
+				if datasets[0]["fill"] != true {
+					t.Errorf("expected fill=true for area chart, got %v", datasets[0]["fill"])
+				}
+
+				if datasets[0]["label"] != "Celsius" {
+					t.Errorf("expected label=Celsius, got %v", datasets[0]["label"])
+				}
+			},
+		},
+		{
+			name: "area chart without title",
+			args: AreaChartArgs{
+				DatasetLabel: "Data",
+				Points: []AreaPoint{
+					{X: "A", Y: 10},
+					{X: "B", Y: 20},
+				},
+			},
+			validate: func(t *testing.T, result map[string]any) {
+				options := result["options"].(map[string]any)
+				plugins := options["plugins"].(map[string]any)
+				title := plugins["title"].(map[string]any)
+				if title["display"] != false {
+					t.Errorf("expected title display=false, got %v", title["display"])
+				}
+			},
+		},
+		{
+			name: "area chart without dataset label",
+			args: AreaChartArgs{
+				Points: []AreaPoint{
+					{X: "X", Y: 5},
+				},
+			},
+			validate: func(t *testing.T, result map[string]any) {
+				data := result["data"].(map[string]any)
+				datasets := data["datasets"].([]map[string]any)
+				if datasets[0]["label"] != "Series 1" {
+					t.Errorf("expected default label='Series 1', got %v", datasets[0]["label"])
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := generateAreaChartJSON(tt.args)
+			tt.validate(t, result)
+
+			// ensure result is valid JSON
+			_, err := json.Marshal(result)
+			if err != nil {
+				t.Errorf("result is not valid JSON: %v", err)
+			}
+		})
+	}
+}
+
+func TestGenerateDoughnutChartJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     DoughnutChartArgs
+		validate func(t *testing.T, result map[string]any)
+	}{
+		{
+			name: "basic doughnut chart",
+			args: DoughnutChartArgs{
+				Title:        "Market Share",
+				DatasetLabel: "Products",
+				Points: []DoughnutPoint{
+					{Label: "Product A", Value: 300},
+					{Label: "Product B", Value: 50},
+					{Label: "Product C", Value: 100},
+				},
+			},
+			validate: func(t *testing.T, result map[string]any) {
+				if result["type"] != "doughnut" {
+					t.Errorf("expected type=doughnut, got %v", result["type"])
+				}
+
+				data := result["data"].(map[string]any)
+				labels := data["labels"].([]string)
+				if len(labels) != 3 {
+					t.Errorf("expected 3 labels, got %d", len(labels))
+				}
+
+				datasets := data["datasets"].([]map[string]any)
+				dataPoints := datasets[0]["data"].([]float64)
+				if dataPoints[0] != 300 || dataPoints[1] != 50 || dataPoints[2] != 100 {
+					t.Errorf("unexpected data: %v", dataPoints)
+				}
+			},
+		},
+		{
+			name: "doughnut chart without dataset label",
+			args: DoughnutChartArgs{
+				Points: []DoughnutPoint{
+					{Label: "A", Value: 10},
+				},
+			},
+			validate: func(t *testing.T, result map[string]any) {
+				data := result["data"].(map[string]any)
+				datasets := data["datasets"].([]map[string]any)
+				if datasets[0]["label"] != "Dataset" {
+					t.Errorf("expected default label='Dataset', got %v", datasets[0]["label"])
+				}
+			},
+		},
+		{
+			name: "single segment",
+			args: DoughnutChartArgs{
+				Points: []DoughnutPoint{
+					{Label: "Only", Value: 100},
+				},
+			},
+			validate: func(t *testing.T, result map[string]any) {
+				data := result["data"].(map[string]any)
+				labels := data["labels"].([]string)
+				if len(labels) != 1 || labels[0] != "Only" {
+					t.Errorf("unexpected labels: %v", labels)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := generateDoughnutChartJSON(tt.args)
+			tt.validate(t, result)
+
+			_, err := json.Marshal(result)
+			if err != nil {
+				t.Errorf("result is not valid JSON: %v", err)
+			}
+		})
+	}
+}
+
+func TestGeneratePieChartJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     PieChartArgs
+		validate func(t *testing.T, result map[string]any)
+	}{
+		{
+			name: "basic pie chart",
+			args: PieChartArgs{
+				Title:        "Sales Distribution",
+				DatasetLabel: "Revenue",
+				Points: []PiePoint{
+					{Label: "Q1", Value: 1000},
+					{Label: "Q2", Value: 1500},
+					{Label: "Q3", Value: 1200},
+				},
+			},
+			validate: func(t *testing.T, result map[string]any) {
+				if result["type"] != "pie" {
+					t.Errorf("expected type=pie, got %v", result["type"])
+				}
+
+				data := result["data"].(map[string]any)
+				labels := data["labels"].([]string)
+				if len(labels) != 3 {
+					t.Errorf("expected 3 labels, got %d", len(labels))
+				}
+
+				datasets := data["datasets"].([]map[string]any)
+				if datasets[0]["label"] != "Revenue" {
+					t.Errorf("expected label=Revenue, got %v", datasets[0]["label"])
+				}
+			},
+		},
+		{
+			name: "pie chart without title",
+			args: PieChartArgs{
+				Points: []PiePoint{
+					{Label: "A", Value: 25},
+					{Label: "B", Value: 75},
+				},
+			},
+			validate: func(t *testing.T, result map[string]any) {
+				options := result["options"].(map[string]any)
+				plugins := options["plugins"].(map[string]any)
+				title := plugins["title"].(map[string]any)
+				if title["display"] != false {
+					t.Errorf("expected title display=false, got %v", title["display"])
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := generatePieChartJSON(tt.args)
+			tt.validate(t, result)
+
+			_, err := json.Marshal(result)
+			if err != nil {
+				t.Errorf("result is not valid JSON: %v", err)
+			}
+		})
+	}
+}
+
+func TestGeneratePolarAreaChartJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     PolarAreaChartArgs
+		validate func(t *testing.T, result map[string]any)
+	}{
+		{
+			name: "basic polar area chart",
+			args: PolarAreaChartArgs{
+				Title:        "Metrics",
+				DatasetLabel: "Performance",
+				Points: []PolarAreaPoint{
+					{Label: "Speed", Value: 11},
+					{Label: "Efficiency", Value: 16},
+					{Label: "Quality", Value: 7},
+				},
+			},
+			validate: func(t *testing.T, result map[string]any) {
+				if result["type"] != "polarArea" {
+					t.Errorf("expected type=polarArea, got %v", result["type"])
+				}
+
+				data := result["data"].(map[string]any)
+				labels := data["labels"].([]string)
+				if len(labels) != 3 {
+					t.Errorf("expected 3 labels, got %d", len(labels))
+				}
+
+				datasets := data["datasets"].([]map[string]any)
+				dataPoints := datasets[0]["data"].([]float64)
+				if dataPoints[0] != 11 || dataPoints[1] != 16 || dataPoints[2] != 7 {
+					t.Errorf("unexpected data: %v", dataPoints)
+				}
+			},
+		},
+		{
+			name: "polar area chart without dataset label",
+			args: PolarAreaChartArgs{
+				Points: []PolarAreaPoint{
+					{Label: "A", Value: 5},
+				},
+			},
+			validate: func(t *testing.T, result map[string]any) {
+				data := result["data"].(map[string]any)
+				datasets := data["datasets"].([]map[string]any)
+				if datasets[0]["label"] != "Dataset" {
+					t.Errorf("expected default label='Dataset', got %v", datasets[0]["label"])
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := generatePolarAreaChartJSON(tt.args)
+			tt.validate(t, result)
+
+			_, err := json.Marshal(result)
+			if err != nil {
+				t.Errorf("result is not valid JSON: %v", err)
+			}
+		})
+	}
+}
+
+func TestGenerateRadarChartJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     RadarChartArgs
+		validate func(t *testing.T, result map[string]any)
+	}{
+		{
+			name: "basic radar chart",
+			args: RadarChartArgs{
+				Title:        "Skills Assessment",
+				DatasetLabel: "Employee A",
+				Points: []RadarPoint{
+					{Label: "Communication", Value: 65},
+					{Label: "Teamwork", Value: 59},
+					{Label: "Technical", Value: 90},
+				},
+			},
+			validate: func(t *testing.T, result map[string]any) {
+				if result["type"] != "radar" {
+					t.Errorf("expected type=radar, got %v", result["type"])
+				}
+
+				data := result["data"].(map[string]any)
+				labels := data["labels"].([]string)
+				if len(labels) != 3 {
+					t.Errorf("expected 3 labels, got %d", len(labels))
+				}
+
+				datasets := data["datasets"].([]map[string]any)
+				if datasets[0]["label"] != "Employee A" {
+					t.Errorf("expected label=Employee A, got %v", datasets[0]["label"])
+				}
+
+				// check radar-specific scale
+				options := result["options"].(map[string]any)
+				scales := options["scales"].(map[string]any)
+				r := scales["r"].(map[string]any)
+				if r["beginAtZero"] != true {
+					t.Error("expected r.beginAtZero=true for radar chart")
+				}
+			},
+		},
+		{
+			name: "radar chart without dataset label",
+			args: RadarChartArgs{
+				Points: []RadarPoint{
+					{Label: "A", Value: 10},
+				},
+			},
+			validate: func(t *testing.T, result map[string]any) {
+				data := result["data"].(map[string]any)
+				datasets := data["datasets"].([]map[string]any)
+				if datasets[0]["label"] != "Series 1" {
+					t.Errorf("expected default label='Series 1', got %v", datasets[0]["label"])
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := generateRadarChartJSON(tt.args)
+			tt.validate(t, result)
+
+			_, err := json.Marshal(result)
+			if err != nil {
+				t.Errorf("result is not valid JSON: %v", err)
+			}
+		})
+	}
+}
+
+func TestGenerateScatterChartJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     ScatterChartArgs
+		validate func(t *testing.T, result map[string]any)
+	}{
+		{
+			name: "basic scatter chart",
+			args: ScatterChartArgs{
+				Title:        "Correlation Analysis",
+				DatasetLabel: "Data Points",
+				Points: []ScatterPoint{
+					{X: -10, Y: 0},
+					{X: 0, Y: 10},
+					{X: 10, Y: 5},
+					{X: 0.5, Y: 5.5},
+				},
+			},
+			validate: func(t *testing.T, result map[string]any) {
+				if result["type"] != "scatter" {
+					t.Errorf("expected type=scatter, got %v", result["type"])
+				}
+
+				data := result["data"].(map[string]any)
+				datasets := data["datasets"].([]map[string]any)
+				dataPoints := datasets[0]["data"].([]map[string]float64)
+
+				if len(dataPoints) != 4 {
+					t.Errorf("expected 4 data points, got %d", len(dataPoints))
+				}
+
+				if dataPoints[0]["x"] != -10 || dataPoints[0]["y"] != 0 {
+					t.Errorf("unexpected first point: %v", dataPoints[0])
+				}
+
+				// check scatter-specific scales
+				options := result["options"].(map[string]any)
+				scales := options["scales"].(map[string]any)
+				x := scales["x"].(map[string]any)
+				if x["type"] != "linear" {
+					t.Errorf("expected x.type=linear, got %v", x["type"])
+				}
+				if x["position"] != "bottom" {
+					t.Errorf("expected x.position=bottom, got %v", x["position"])
+				}
+			},
+		},
+		{
+			name: "scatter chart without dataset label",
+			args: ScatterChartArgs{
+				Points: []ScatterPoint{
+					{X: 1, Y: 2},
+				},
+			},
+			validate: func(t *testing.T, result map[string]any) {
+				data := result["data"].(map[string]any)
+				datasets := data["datasets"].([]map[string]any)
+				if datasets[0]["label"] != "Series 1" {
+					t.Errorf("expected default label='Series 1', got %v", datasets[0]["label"])
+				}
+			},
+		},
+		{
+			name: "negative coordinates",
+			args: ScatterChartArgs{
+				Points: []ScatterPoint{
+					{X: -5, Y: -10},
+					{X: -2.5, Y: 3.7},
+				},
+			},
+			validate: func(t *testing.T, result map[string]any) {
+				data := result["data"].(map[string]any)
+				datasets := data["datasets"].([]map[string]any)
+				dataPoints := datasets[0]["data"].([]map[string]float64)
+				if dataPoints[0]["x"] != -5 || dataPoints[0]["y"] != -10 {
+					t.Errorf("negative values not preserved: %v", dataPoints[0])
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := generateScatterChartJSON(tt.args)
+			tt.validate(t, result)
+
+			_, err := json.Marshal(result)
+			if err != nil {
+				t.Errorf("result is not valid JSON: %v", err)
 			}
 		})
 	}
@@ -355,6 +921,487 @@ func TestDataConsistency(t *testing.T) {
 
 		if len(labels) != len(dataPoints) {
 			t.Errorf("labels length (%d) != data length (%d)", len(labels), len(dataPoints))
+		}
+	})
+
+	t.Run("area chart labels and data length match", func(t *testing.T) {
+		args := AreaChartArgs{
+			Points: []AreaPoint{
+				{X: "A", Y: 1},
+				{X: "B", Y: 2},
+			},
+		}
+		result := generateAreaChartJSON(args)
+		data := result["data"].(map[string]any)
+		labels := data["labels"].([]string)
+		datasets := data["datasets"].([]map[string]any)
+		dataPoints := datasets[0]["data"].([]float64)
+
+		if len(labels) != len(dataPoints) {
+			t.Errorf("labels length (%d) != data length (%d)", len(labels), len(dataPoints))
+		}
+	})
+
+	t.Run("doughnut chart labels and data length match", func(t *testing.T) {
+		args := DoughnutChartArgs{
+			Points: []DoughnutPoint{
+				{Label: "A", Value: 10},
+				{Label: "B", Value: 20},
+			},
+		}
+		result := generateDoughnutChartJSON(args)
+		data := result["data"].(map[string]any)
+		labels := data["labels"].([]string)
+		datasets := data["datasets"].([]map[string]any)
+		dataPoints := datasets[0]["data"].([]float64)
+
+		if len(labels) != len(dataPoints) {
+			t.Errorf("labels length (%d) != data length (%d)", len(labels), len(dataPoints))
+		}
+	})
+}
+
+func TestGenerateSequenceDiagramDSL(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     SequenceDiagramArgs
+		validate func(t *testing.T, result string)
+	}{
+		{
+			name: "basic sequence diagram with messages",
+			args: SequenceDiagramArgs{
+				Messages: []Message{
+					{From: "Alice", To: "Bob", Text: "Hello Bob"},
+					{From: "Bob", To: "Alice", Text: "Hi Alice"},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "sequenceDiagram") {
+					t.Error("missing sequenceDiagram keyword")
+				}
+				if !strings.Contains(result, "Alice->>Bob: Hello Bob") {
+					t.Error("missing first message")
+				}
+				if !strings.Contains(result, "Bob->>Alice: Hi Alice") {
+					t.Error("missing second message")
+				}
+			},
+		},
+		{
+			name: "diagram with title and autonumber",
+			args: SequenceDiagramArgs{
+				Title:      "Login Flow",
+				AutoNumber: true,
+				Messages: []Message{
+					{From: "User", To: "Server", Text: "Login request"},
+					{From: "Server", To: "Database", Text: "Verify credentials"},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "title: Login Flow") {
+					t.Error("missing title")
+				}
+				if !strings.Contains(result, "autonumber") {
+					t.Error("missing autonumber")
+				}
+			},
+		},
+		{
+			name: "diagram with explicit participants",
+			args: SequenceDiagramArgs{
+				Participants: []Participant{
+					{ID: "A", Label: "Alice", Type: "actor"},
+					{ID: "B", Label: "Bob", Type: "participant"},
+				},
+				Messages: []Message{
+					{From: "A", To: "B", Text: "Test"},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "actor A as Alice") {
+					t.Error("missing actor participant")
+				}
+				if !strings.Contains(result, "participant B as Bob") {
+					t.Error("missing participant")
+				}
+			},
+		},
+		{
+			name: "diagram with different arrow types",
+			args: SequenceDiagramArgs{
+				Messages: []Message{
+					{From: "A", To: "B", Text: "Sync call", ArrowType: "->>"},
+					{From: "B", To: "A", Text: "Response", ArrowType: "-->>"},
+					{From: "A", To: "C", Text: "Async", ArrowType: "-)"},
+					{From: "A", To: "D", Text: "Lost", ArrowType: "-x"},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "A->>B: Sync call") {
+					t.Error("missing sync arrow")
+				}
+				if !strings.Contains(result, "B-->>A: Response") {
+					t.Error("missing dotted arrow")
+				}
+				if !strings.Contains(result, "A-)C: Async") {
+					t.Error("missing async arrow")
+				}
+				if !strings.Contains(result, "A-xD: Lost") {
+					t.Error("missing cross arrow")
+				}
+			},
+		},
+		{
+			name: "diagram with activations",
+			args: SequenceDiagramArgs{
+				Messages: []Message{
+					{From: "A", To: "B", Text: "Request", Activate: true},
+					{From: "B", To: "A", Text: "Response", Deactivate: true},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "A->>+B: Request") {
+					t.Error("missing activation")
+				}
+				if !strings.Contains(result, "B->>-A: Response") {
+					t.Error("missing deactivation")
+				}
+			},
+		},
+		{
+			name: "diagram with notes",
+			args: SequenceDiagramArgs{
+				Messages: []Message{
+					{From: "A", To: "B", Text: "Hello"},
+				},
+				Notes: []Note{
+					{Position: "right of", Participants: []string{"A"}, Text: "Note on A"},
+					{Position: "over", Participants: []string{"A", "B"}, Text: "Spanning note"},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "Note right of A: Note on A") {
+					t.Error("missing right of note")
+				}
+				if !strings.Contains(result, "Note over A,B: Spanning note") {
+					t.Error("missing over note")
+				}
+			},
+		},
+		{
+			name: "diagram with boxes",
+			args: SequenceDiagramArgs{
+				Participants: []Participant{
+					{ID: "A"},
+					{ID: "B"},
+				},
+				Boxes: []Box{
+					{Label: "Backend", Color: "lightblue", Participants: []string{"A", "B"}},
+				},
+				Messages: []Message{
+					{From: "A", To: "B", Text: "Internal call"},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "box lightblue Backend") {
+					t.Error("missing box definition")
+				}
+				if !strings.Contains(result, "end") {
+					t.Error("missing box end")
+				}
+			},
+		},
+		{
+			name: "diagram with loops",
+			args: SequenceDiagramArgs{
+				Messages: []Message{
+					{From: "A", To: "B", Text: "Start"},
+				},
+				Loops: []Loop{
+					{
+						Text: "Every minute",
+						Messages: []Message{
+							{From: "A", To: "B", Text: "Ping"},
+							{From: "B", To: "A", Text: "Pong"},
+						},
+					},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "loop Every minute") {
+					t.Error("missing loop definition")
+				}
+				if !strings.Contains(result, "A->>B: Ping") {
+					t.Error("missing message in loop")
+				}
+			},
+		},
+		{
+			name: "diagram with alt/else",
+			args: SequenceDiagramArgs{
+				Messages: []Message{
+					{From: "User", To: "Server", Text: "Login"},
+				},
+				Alts: []Alt{
+					{
+						IfText: "Valid credentials",
+						IfMessages: []Message{
+							{From: "Server", To: "User", Text: "Success"},
+						},
+						ElseText: "Invalid credentials",
+						ElseMessages: []Message{
+							{From: "Server", To: "User", Text: "Error"},
+						},
+					},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "alt Valid credentials") {
+					t.Error("missing alt definition")
+				}
+				if !strings.Contains(result, "else Invalid credentials") {
+					t.Error("missing else definition")
+				}
+			},
+		},
+		{
+			name: "diagram with opt (no else)",
+			args: SequenceDiagramArgs{
+				Messages: []Message{
+					{From: "A", To: "B", Text: "Request"},
+				},
+				Alts: []Alt{
+					{
+						IfText: "Cache exists",
+						IfMessages: []Message{
+							{From: "B", To: "Cache", Text: "Get from cache"},
+						},
+					},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "alt Cache exists") {
+					t.Error("missing alt definition")
+				}
+				if strings.Contains(result, "else") {
+					t.Error("should not have else block")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := generateSequenceDiagramDSL(tt.args)
+			fmt.Println("Generated DSL:\n", result)
+			tt.validate(t, result)
+		})
+	}
+}
+
+func TestValidateSequenceDiagramArgs(t *testing.T) {
+	t.Run("valid basic diagram", func(t *testing.T) {
+		args := SequenceDiagramArgs{
+			Messages: []Message{
+				{From: "A", To: "B", Text: "Hello"},
+			},
+		}
+		if err := validateSequenceDiagramArgs(args); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("empty messages", func(t *testing.T) {
+		args := SequenceDiagramArgs{
+			Messages: []Message{},
+		}
+		if err := validateSequenceDiagramArgs(args); err == nil {
+			t.Error("expected error for empty messages")
+		}
+	})
+
+	t.Run("message with empty from", func(t *testing.T) {
+		args := SequenceDiagramArgs{
+			Messages: []Message{
+				{From: "", To: "B", Text: "Hello"},
+			},
+		}
+		if err := validateSequenceDiagramArgs(args); err == nil {
+			t.Error("expected error for empty from field")
+		}
+	})
+
+	t.Run("message with empty to", func(t *testing.T) {
+		args := SequenceDiagramArgs{
+			Messages: []Message{
+				{From: "A", To: "", Text: "Hello"},
+			},
+		}
+		if err := validateSequenceDiagramArgs(args); err == nil {
+			t.Error("expected error for empty to field")
+		}
+	})
+
+	t.Run("participant with empty id", func(t *testing.T) {
+		args := SequenceDiagramArgs{
+			Participants: []Participant{
+				{ID: "", Label: "Alice"},
+			},
+			Messages: []Message{
+				{From: "A", To: "B", Text: "Test"},
+			},
+		}
+		if err := validateSequenceDiagramArgs(args); err == nil {
+			t.Error("expected error for empty participant ID")
+		}
+	})
+
+	t.Run("note with unknown participant", func(t *testing.T) {
+		args := SequenceDiagramArgs{
+			Messages: []Message{
+				{From: "A", To: "B", Text: "Test"},
+			},
+			Notes: []Note{
+				{Position: "right of", Participants: []string{"C"}, Text: "Note"},
+			},
+		}
+		if err := validateSequenceDiagramArgs(args); err == nil {
+			t.Error("expected error for unknown participant in note")
+		}
+	})
+
+	t.Run("note right of with multiple participants", func(t *testing.T) {
+		args := SequenceDiagramArgs{
+			Messages: []Message{
+				{From: "A", To: "B", Text: "Test"},
+			},
+			Notes: []Note{
+				{Position: "right of", Participants: []string{"A", "B"}, Text: "Note"},
+			},
+		}
+		if err := validateSequenceDiagramArgs(args); err == nil {
+			t.Error("expected error for right of with multiple participants")
+		}
+	})
+
+	t.Run("note over with too many participants", func(t *testing.T) {
+		args := SequenceDiagramArgs{
+			Messages: []Message{
+				{From: "A", To: "B", Text: "Test"},
+			},
+			Notes: []Note{
+				{Position: "over", Participants: []string{"A", "B", "C"}, Text: "Note"},
+			},
+		}
+		if err := validateSequenceDiagramArgs(args); err == nil {
+			t.Error("expected error for over with too many participants")
+		}
+	})
+
+	t.Run("box with unknown participant", func(t *testing.T) {
+		args := SequenceDiagramArgs{
+			Messages: []Message{
+				{From: "A", To: "B", Text: "Test"},
+			},
+			Boxes: []Box{
+				{Label: "Group", Participants: []string{"C"}},
+			},
+		}
+		if err := validateSequenceDiagramArgs(args); err == nil {
+			t.Error("expected error for unknown participant in box")
+		}
+	})
+
+	t.Run("loop with empty text", func(t *testing.T) {
+		args := SequenceDiagramArgs{
+			Messages: []Message{
+				{From: "A", To: "B", Text: "Test"},
+			},
+			Loops: []Loop{
+				{
+					Text: "",
+					Messages: []Message{
+						{From: "A", To: "B", Text: "Repeat"},
+					},
+				},
+			},
+		}
+		if err := validateSequenceDiagramArgs(args); err == nil {
+			t.Error("expected error for loop with empty text")
+		}
+	})
+
+	t.Run("loop with no messages", func(t *testing.T) {
+		args := SequenceDiagramArgs{
+			Messages: []Message{
+				{From: "A", To: "B", Text: "Test"},
+			},
+			Loops: []Loop{
+				{
+					Text:     "Loop",
+					Messages: []Message{},
+				},
+			},
+		}
+		if err := validateSequenceDiagramArgs(args); err == nil {
+			t.Error("expected error for loop with no messages")
+		}
+	})
+
+	t.Run("alt with empty ifText", func(t *testing.T) {
+		args := SequenceDiagramArgs{
+			Messages: []Message{
+				{From: "A", To: "B", Text: "Test"},
+			},
+			Alts: []Alt{
+				{
+					IfText: "",
+					IfMessages: []Message{
+						{From: "A", To: "B", Text: "Yes"},
+					},
+				},
+			},
+		}
+		if err := validateSequenceDiagramArgs(args); err == nil {
+			t.Error("expected error for alt with empty ifText")
+		}
+	})
+
+	t.Run("alt with no ifMessages", func(t *testing.T) {
+		args := SequenceDiagramArgs{
+			Messages: []Message{
+				{From: "A", To: "B", Text: "Test"},
+			},
+			Alts: []Alt{
+				{
+					IfText:     "Condition",
+					IfMessages: []Message{},
+				},
+			},
+		}
+		if err := validateSequenceDiagramArgs(args); err == nil {
+			t.Error("expected error for alt with no ifMessages")
+		}
+	})
+
+	t.Run("alt with elseText but no elseMessages", func(t *testing.T) {
+		args := SequenceDiagramArgs{
+			Messages: []Message{
+				{From: "A", To: "B", Text: "Test"},
+			},
+			Alts: []Alt{
+				{
+					IfText: "Condition",
+					IfMessages: []Message{
+						{From: "A", To: "B", Text: "Yes"},
+					},
+					ElseText:     "Otherwise",
+					ElseMessages: []Message{},
+				},
+			},
+		}
+		if err := validateSequenceDiagramArgs(args); err == nil {
+			t.Error("expected error for alt with elseText but no elseMessages")
 		}
 	})
 }
