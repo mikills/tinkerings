@@ -1405,3 +1405,491 @@ func TestValidateSequenceDiagramArgs(t *testing.T) {
 		}
 	})
 }
+
+func TestGenerateFlowchartDSL(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     FlowchartArgs
+		validate func(t *testing.T, result string)
+	}{
+		{
+			name: "basic flowchart with links",
+			args: FlowchartArgs{
+				Links: []FlowchartLink{
+					{From: "A", To: "B"},
+					{From: "B", To: "C"},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "flowchart TB") {
+					t.Error("missing flowchart keyword with default direction")
+				}
+				if !strings.Contains(result, "A --> B") {
+					t.Error("missing first link")
+				}
+				if !strings.Contains(result, "B --> C") {
+					t.Error("missing second link")
+				}
+			},
+		},
+		{
+			name: "flowchart with custom direction",
+			args: FlowchartArgs{
+				Direction: "LR",
+				Links: []FlowchartLink{
+					{From: "Start", To: "End"},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "flowchart LR") {
+					t.Error("missing LR direction")
+				}
+			},
+		},
+		{
+			name: "flowchart with explicit nodes and shapes",
+			args: FlowchartArgs{
+				Nodes: []FlowchartNode{
+					{ID: "A", Label: "Start", Shape: "circle"},
+					{ID: "B", Label: "Process", Shape: "rectangle"},
+					{ID: "C", Label: "Decision", Shape: "diamond"},
+					{ID: "D", Label: "End", Shape: "double-circle"},
+				},
+				Links: []FlowchartLink{
+					{From: "A", To: "B"},
+					{From: "B", To: "C"},
+					{From: "C", To: "D"},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "A((Start))") {
+					t.Error("missing circle node")
+				}
+				if !strings.Contains(result, "B[Process]") {
+					t.Error("missing rectangle node")
+				}
+				if !strings.Contains(result, "C{Decision}") {
+					t.Error("missing diamond node")
+				}
+				if !strings.Contains(result, "D(((End)))") {
+					t.Error("missing double-circle node")
+				}
+			},
+		},
+		{
+			name: "flowchart with different arrow types",
+			args: FlowchartArgs{
+				Links: []FlowchartLink{
+					{From: "A", To: "B", ArrowType: "-->"},
+					{From: "B", To: "C", ArrowType: "---"},
+					{From: "C", To: "D", ArrowType: "-.->"},
+					{From: "D", To: "E", ArrowType: "==>"},
+					{From: "E", To: "F", ArrowType: "--o"},
+					{From: "F", To: "G", ArrowType: "--x"},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "A --> B") {
+					t.Error("missing solid arrow")
+				}
+				if !strings.Contains(result, "B --- C") {
+					t.Error("missing open link")
+				}
+				if !strings.Contains(result, "C -.-> D") {
+					t.Error("missing dotted arrow")
+				}
+				if !strings.Contains(result, "D ==> E") {
+					t.Error("missing thick arrow")
+				}
+				if !strings.Contains(result, "E --o F") {
+					t.Error("missing circle edge")
+				}
+				if !strings.Contains(result, "F --x G") {
+					t.Error("missing cross edge")
+				}
+			},
+		},
+		{
+			name: "flowchart with link text",
+			args: FlowchartArgs{
+				Links: []FlowchartLink{
+					{From: "A", To: "B", Text: "yes"},
+					{From: "A", To: "C", Text: "no"},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "A -->|yes| B") {
+					t.Error("missing link with yes text")
+				}
+				if !strings.Contains(result, "A -->|no| C") {
+					t.Error("missing link with no text")
+				}
+			},
+		},
+		{
+			name: "flowchart with extended link length",
+			args: FlowchartArgs{
+				Links: []FlowchartLink{
+					{From: "A", To: "B", Length: 2},
+					{From: "C", To: "D", ArrowType: "-.->", Length: 3},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "A ----> B") {
+					t.Error("missing extended solid arrow")
+				}
+				if !strings.Contains(result, "C -...-> D") {
+					t.Error("missing extended dotted arrow")
+				}
+			},
+		},
+		{
+			name: "flowchart with subgraph",
+			args: FlowchartArgs{
+				Nodes: []FlowchartNode{
+					{ID: "A", Label: "Outside"},
+					{ID: "B", Label: "Inside1"},
+					{ID: "C", Label: "Inside2"},
+				},
+				Links: []FlowchartLink{
+					{From: "A", To: "B"},
+					{From: "B", To: "C"},
+				},
+				Subgraphs: []FlowchartSubgraph{
+					{
+						Title: "My Subgraph",
+						Nodes: []string{"B", "C"},
+					},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "subgraph My Subgraph") {
+					t.Error("missing subgraph definition")
+				}
+				if !strings.Contains(result, "end") {
+					t.Error("missing subgraph end")
+				}
+			},
+		},
+		{
+			name: "flowchart with subgraph ID and direction",
+			args: FlowchartArgs{
+				Nodes: []FlowchartNode{
+					{ID: "A"},
+					{ID: "B"},
+				},
+				Links: []FlowchartLink{
+					{From: "A", To: "B"},
+				},
+				Subgraphs: []FlowchartSubgraph{
+					{
+						ID:        "sg1",
+						Title:     "Group",
+						Nodes:     []string{"A", "B"},
+						Direction: "LR",
+					},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "subgraph sg1 [Group]") {
+					t.Error("missing subgraph with ID")
+				}
+				if !strings.Contains(result, "direction LR") {
+					t.Error("missing subgraph direction")
+				}
+			},
+		},
+		{
+			name: "flowchart with styles",
+			args: FlowchartArgs{
+				Nodes: []FlowchartNode{
+					{ID: "A", Label: "Styled Node"},
+				},
+				Links: []FlowchartLink{
+					{From: "A", To: "B"},
+				},
+				Styles: []FlowchartStyle{
+					{Target: "A", Properties: "fill:#f9f,stroke:#333"},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "style A fill:#f9f,stroke:#333") {
+					t.Error("missing style definition")
+				}
+			},
+		},
+		{
+			name: "flowchart with class definitions",
+			args: FlowchartArgs{
+				Nodes: []FlowchartNode{
+					{ID: "A"},
+					{ID: "B"},
+				},
+				Links: []FlowchartLink{
+					{From: "A", To: "B"},
+				},
+				ClassDefs: []FlowchartClassDef{
+					{
+						ClassName:  "highlight",
+						Properties: "fill:#ff0,stroke:#f00",
+						Nodes:      []string{"A", "B"},
+					},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "classDef highlight fill:#ff0,stroke:#f00") {
+					t.Error("missing classDef definition")
+				}
+				if !strings.Contains(result, "class A,B highlight") {
+					t.Error("missing class application")
+				}
+			},
+		},
+		{
+			name: "flowchart with all node shapes",
+			args: FlowchartArgs{
+				Nodes: []FlowchartNode{
+					{ID: "N1", Shape: "rectangle"},
+					{ID: "N2", Shape: "round"},
+					{ID: "N3", Shape: "stadium"},
+					{ID: "N4", Shape: "subroutine"},
+					{ID: "N5", Shape: "cylinder"},
+					{ID: "N6", Shape: "circle"},
+					{ID: "N7", Shape: "asymmetric"},
+					{ID: "N8", Shape: "diamond"},
+					{ID: "N9", Shape: "hexagon"},
+					{ID: "N10", Shape: "parallelogram"},
+					{ID: "N11", Shape: "trapezoid"},
+					{ID: "N12", Shape: "double-circle"},
+				},
+				Links: []FlowchartLink{
+					{From: "N1", To: "N2"},
+				},
+			},
+			validate: func(t *testing.T, result string) {
+				shapes := []string{
+					"N1[N1]",       // rectangle
+					"N2(N2)",       // round
+					"N3([N3])",     // stadium
+					"N4[[N4]]",     // subroutine
+					"N5[(N5)]",     // cylinder
+					"N6((N6))",     // circle
+					"N7>N7]",       // asymmetric
+					"N8{N8}",       // diamond
+					"N9{{N9}}",     // hexagon
+					"N10[/N10/]",   // parallelogram
+					"N11[/N11\\]",  // trapezoid
+					"N12(((N12)))", // double-circle
+				}
+				for _, shape := range shapes {
+					if !strings.Contains(result, shape) {
+						t.Errorf("missing shape: %s", shape)
+					}
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := generateFlowchartDSL(tt.args)
+			tt.validate(t, result)
+		})
+	}
+}
+
+func TestValidateFlowchartArgs(t *testing.T) {
+	t.Run("valid basic flowchart", func(t *testing.T) {
+		args := FlowchartArgs{
+			Links: []FlowchartLink{
+				{From: "A", To: "B"},
+			},
+		}
+		if err := validateFlowchartArgs(args); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("empty links", func(t *testing.T) {
+		args := FlowchartArgs{
+			Links: []FlowchartLink{},
+		}
+		if err := validateFlowchartArgs(args); err == nil {
+			t.Error("expected error for empty links")
+		}
+	})
+
+	t.Run("invalid direction", func(t *testing.T) {
+		args := FlowchartArgs{
+			Direction: "INVALID",
+			Links: []FlowchartLink{
+				{From: "A", To: "B"},
+			},
+		}
+		if err := validateFlowchartArgs(args); err == nil {
+			t.Error("expected error for invalid direction")
+		}
+	})
+
+	t.Run("link with empty from", func(t *testing.T) {
+		args := FlowchartArgs{
+			Links: []FlowchartLink{
+				{From: "", To: "B"},
+			},
+		}
+		if err := validateFlowchartArgs(args); err == nil {
+			t.Error("expected error for empty from field")
+		}
+	})
+
+	t.Run("link with empty to", func(t *testing.T) {
+		args := FlowchartArgs{
+			Links: []FlowchartLink{
+				{From: "A", To: ""},
+			},
+		}
+		if err := validateFlowchartArgs(args); err == nil {
+			t.Error("expected error for empty to field")
+		}
+	})
+
+	t.Run("node with empty id", func(t *testing.T) {
+		args := FlowchartArgs{
+			Nodes: []FlowchartNode{
+				{ID: ""},
+			},
+			Links: []FlowchartLink{
+				{From: "A", To: "B"},
+			},
+		}
+		if err := validateFlowchartArgs(args); err == nil {
+			t.Error("expected error for empty node ID")
+		}
+	})
+
+	t.Run("subgraph with empty title", func(t *testing.T) {
+		args := FlowchartArgs{
+			Links: []FlowchartLink{
+				{From: "A", To: "B"},
+			},
+			Subgraphs: []FlowchartSubgraph{
+				{Title: "", Nodes: []string{"A"}},
+			},
+		}
+		if err := validateFlowchartArgs(args); err == nil {
+			t.Error("expected error for empty subgraph title")
+		}
+	})
+
+	t.Run("subgraph with no nodes", func(t *testing.T) {
+		args := FlowchartArgs{
+			Links: []FlowchartLink{
+				{From: "A", To: "B"},
+			},
+			Subgraphs: []FlowchartSubgraph{
+				{Title: "Group", Nodes: []string{}},
+			},
+		}
+		if err := validateFlowchartArgs(args); err == nil {
+			t.Error("expected error for subgraph with no nodes")
+		}
+	})
+
+	t.Run("subgraph with unknown node", func(t *testing.T) {
+		args := FlowchartArgs{
+			Links: []FlowchartLink{
+				{From: "A", To: "B"},
+			},
+			Subgraphs: []FlowchartSubgraph{
+				{Title: "Group", Nodes: []string{"C"}},
+			},
+		}
+		if err := validateFlowchartArgs(args); err == nil {
+			t.Error("expected error for subgraph with unknown node")
+		}
+	})
+
+	t.Run("subgraph with invalid direction", func(t *testing.T) {
+		args := FlowchartArgs{
+			Links: []FlowchartLink{
+				{From: "A", To: "B"},
+			},
+			Subgraphs: []FlowchartSubgraph{
+				{Title: "Group", Nodes: []string{"A"}, Direction: "INVALID"},
+			},
+		}
+		if err := validateFlowchartArgs(args); err == nil {
+			t.Error("expected error for invalid subgraph direction")
+		}
+	})
+
+	t.Run("style with empty target", func(t *testing.T) {
+		args := FlowchartArgs{
+			Links: []FlowchartLink{
+				{From: "A", To: "B"},
+			},
+			Styles: []FlowchartStyle{
+				{Target: "", Properties: "fill:#f9f"},
+			},
+		}
+		if err := validateFlowchartArgs(args); err == nil {
+			t.Error("expected error for style with empty target")
+		}
+	})
+
+	t.Run("style with empty properties", func(t *testing.T) {
+		args := FlowchartArgs{
+			Links: []FlowchartLink{
+				{From: "A", To: "B"},
+			},
+			Styles: []FlowchartStyle{
+				{Target: "A", Properties: ""},
+			},
+		}
+		if err := validateFlowchartArgs(args); err == nil {
+			t.Error("expected error for style with empty properties")
+		}
+	})
+
+	t.Run("classDef with empty class name", func(t *testing.T) {
+		args := FlowchartArgs{
+			Links: []FlowchartLink{
+				{From: "A", To: "B"},
+			},
+			ClassDefs: []FlowchartClassDef{
+				{ClassName: "", Properties: "fill:#f9f"},
+			},
+		}
+		if err := validateFlowchartArgs(args); err == nil {
+			t.Error("expected error for classDef with empty class name")
+		}
+	})
+
+	t.Run("classDef with empty properties", func(t *testing.T) {
+		args := FlowchartArgs{
+			Links: []FlowchartLink{
+				{From: "A", To: "B"},
+			},
+			ClassDefs: []FlowchartClassDef{
+				{ClassName: "myClass", Properties: ""},
+			},
+		}
+		if err := validateFlowchartArgs(args); err == nil {
+			t.Error("expected error for classDef with empty properties")
+		}
+	})
+
+	t.Run("classDef with unknown node", func(t *testing.T) {
+		args := FlowchartArgs{
+			Links: []FlowchartLink{
+				{From: "A", To: "B"},
+			},
+			ClassDefs: []FlowchartClassDef{
+				{ClassName: "myClass", Properties: "fill:#f9f", Nodes: []string{"C"}},
+			},
+		}
+		if err := validateFlowchartArgs(args); err == nil {
+			t.Error("expected error for classDef with unknown node")
+		}
+	})
+}

@@ -52,11 +52,12 @@ func main() {
 	_, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	srv := server.NewMCPServer("chartjs-generator", "2.1.0")
+	srv := server.NewMCPServer("chartjs-generator", "2.2.0")
 
 	registerAreaChartTool(srv)
 	registerBarChartTool(srv)
 	registerDoughnutChartTool(srv)
+	registerFlowchartTool(srv)
 	registerLineChartTool(srv)
 	registerPieChartTool(srv)
 	registerPolarAreaChartTool(srv)

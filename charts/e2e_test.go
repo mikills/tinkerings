@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -111,8 +112,8 @@ func TestMCPServerIntegration(t *testing.T) {
 		result := resp["result"].(map[string]any)
 		tools := result["tools"].([]any)
 
-		if len(tools) != 9 {
-			t.Errorf("expected 9 tools, got %d", len(tools))
+		if len(tools) != 10 {
+			t.Errorf("expected 10 tools, got %d", len(tools))
 		}
 
 		// verify all chart tools exist
@@ -120,6 +121,7 @@ func TestMCPServerIntegration(t *testing.T) {
 			"area-chart-generator",
 			"bar-chart-generator",
 			"doughnut-chart-generator",
+			"flowchart-generator",
 			"line-chart-generator",
 			"pie-chart-generator",
 			"polar-area-chart-generator",
@@ -701,6 +703,87 @@ func TestMCPServerIntegration(t *testing.T) {
 		}
 
 		t.Logf("Successfully generated sequence diagram DSL:\n%s", dslText)
+	})
+
+	t.Run("call flowchart tool", func(t *testing.T) {
+		req := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      13,
+			"method":  "tools/call",
+			"params": map[string]any{
+				"name": "flowchart-generator",
+				"arguments": map[string]any{
+					"direction": "LR",
+					"nodes": []map[string]any{
+						{"id": "Start", "label": "Begin", "shape": "circle"},
+						{"id": "Process", "label": "Execute Task", "shape": "rectangle"},
+						{"id": "Decision", "label": "Success?", "shape": "diamond"},
+						{"id": "End", "label": "Finish", "shape": "double-circle"},
+					},
+					"links": []map[string]any{
+						{"from": "Start", "to": "Process"},
+						{"from": "Process", "to": "Decision"},
+						{"from": "Decision", "to": "End", "text": "yes", "arrowType": "-->"},
+						{"from": "Decision", "to": "Process", "text": "no", "arrowType": "-.->"},
+					},
+					"styles": []map[string]any{
+						{"target": "Start", "properties": "fill:#90EE90"},
+						{"target": "End", "properties": "fill:#FFB6C1"},
+					},
+				},
+			},
+		}
+
+		if err := sendRequest(stdin, req); err != nil {
+			t.Fatalf("failed to send tools/call: %v", err)
+		}
+
+		resp, err := readResponse(reader)
+		if err != nil {
+			t.Fatalf("failed to read tools/call response: %v", err)
+		}
+
+		if resp["error"] != nil {
+			t.Fatalf("tools/call returned error: %v", resp["error"])
+		}
+
+		result := resp["result"].(map[string]any)
+		content := result["content"].([]any)
+		contentItem := content[0].(map[string]any)
+
+		if contentItem["type"] != "text" {
+			t.Errorf("expected content type=text, got %v", contentItem["type"])
+		}
+
+		dslText := contentItem["text"].(string)
+
+		// verify mermaid DSL structure
+		if len(dslText) == 0 {
+			t.Fatal("DSL text is empty")
+		}
+
+		// check for essential mermaid flowchart elements
+		requiredElements := []string{
+			"flowchart LR",
+			"Start((Begin))",
+			"Process[Execute Task]",
+			"Decision{Success?}",
+			"End(((Finish)))",
+			"Start --> Process",
+			"Process --> Decision",
+			"Decision -->|yes| End",
+			"Decision -.->|no| Process",
+			"style Start fill:#90EE90",
+			"style End fill:#FFB6C1",
+		}
+
+		for _, elem := range requiredElements {
+			if !strings.Contains(dslText, elem) {
+				t.Errorf("DSL missing required element: %s\nGenerated DSL:\n%s", elem, dslText)
+			}
+		}
+
+		t.Logf("Successfully generated flowchart DSL:\n%s", dslText)
 	})
 }
 
