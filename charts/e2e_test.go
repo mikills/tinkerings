@@ -121,21 +121,21 @@ func TestMCPServerIntegration(t *testing.T) {
 		for _, tool := range tools {
 			toolMap := tool.(map[string]any)
 			name := toolMap["name"].(string)
-			if name == "chartjs.bar.generate" {
+			if name == "bar-chart-generator" {
 				foundBar = true
 				t.Logf("Found tool: %s - %s", name, toolMap["description"])
 			}
-			if name == "chartjs.line.generate" {
+			if name == "line-chart-generator" {
 				foundLine = true
 				t.Logf("Found tool: %s - %s", name, toolMap["description"])
 			}
 		}
 
 		if !foundBar {
-			t.Error("chartjs.bar.generate tool not found")
+			t.Error("bar-chart-generator tool not found")
 		}
 		if !foundLine {
-			t.Error("chartjs.line.generate tool not found")
+			t.Error("line-chart-generator tool not found")
 		}
 	})
 
@@ -145,7 +145,7 @@ func TestMCPServerIntegration(t *testing.T) {
 			"id":      3,
 			"method":  "tools/call",
 			"params": map[string]any{
-				"name": "chartjs.bar.generate",
+				"name": "bar-chart-generator",
 				"arguments": map[string]any{
 					"title":        "Q1 Sales",
 					"datasetLabel": "Revenue",
@@ -209,7 +209,7 @@ func TestMCPServerIntegration(t *testing.T) {
 			"id":      4,
 			"method":  "tools/call",
 			"params": map[string]any{
-				"name": "chartjs.line.generate",
+				"name": "line-chart-generator",
 				"arguments": map[string]any{
 					"title":        "Temperature",
 					"datasetLabel": "Celsius",
@@ -257,7 +257,7 @@ func TestMCPServerIntegration(t *testing.T) {
 			"id":      5,
 			"method":  "tools/call",
 			"params": map[string]any{
-				"name": "chartjs.bar.generate",
+				"name": "bar-chart-generator",
 				"arguments": map[string]any{
 					"points": []map[string]any{},
 				},
