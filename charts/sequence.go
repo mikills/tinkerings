@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -21,7 +22,7 @@ type Message struct {
 	From       string `json:"from" jsonschema:"description=Source participant ID,required"`
 	To         string `json:"to" jsonschema:"description=Target participant ID,required"`
 	Text       string `json:"text" jsonschema:"description=Message text,required"`
-	ArrowType  string `json:"arrowType,omitempty" jsonschema:"description=Arrow type,enum=->,enum=-->,enum=->>,enum=-->,enum=<<->>,enum=<<-->>,enum=-x,enum=--x,enum=-),enum=--)"`
+	ArrowType  string `json:"arrowType,omitempty" jsonschema:"description=Arrow type,enum=->,enum=-->,enum=->>,enum=-->>,enum=-x,enum=--x,enum=-),enum=--),enum=<<->>,enum=<<-->>"`
 	Activate   bool   `json:"activate,omitempty" jsonschema:"description=Activate the target participant"`
 	Deactivate bool   `json:"deactivate,omitempty" jsonschema:"description=Deactivate the target participant"`
 }
@@ -36,7 +37,7 @@ type Note struct {
 // Box represents a grouping box for participants
 type Box struct {
 	Label        string   `json:"label,omitempty" jsonschema:"description=Box label"`
-	Color        string   `json:"color,omitempty" jsonschema:"description=Box color (e.g. 'Aqua', 'rgb(33,66,99)', 'transparent')"`
+	Color        string   `json:"color,omitempty" jsonschema:"description=Box color (e.g. 'Aqua', 'rgb(33,66,99)', 'rgba(0,0,0,0.5)', 'transparent')"`
 	Participants []string `json:"participants" jsonschema:"description=Participant IDs to group,required,minItems=1"`
 }
 
@@ -54,113 +55,72 @@ type Alt struct {
 	ElseMessages []Message `json:"elseMessages,omitempty" jsonschema:"description=Messages in else block"`
 }
 
-// SequenceDiagramArgs represents the arguments for generating a sequence diagram
-type SequenceDiagramArgs struct {
-	Title        string        `json:"title,omitempty" jsonschema:"description=Diagram title"`
-	AutoNumber   bool          `json:"autoNumber,omitempty" jsonschema:"description=Enable automatic message numbering"`
-	Participants []Participant `json:"participants,omitempty" jsonschema:"description=Explicit participant definitions (optional - participants are auto-detected from messages)"`
-	Messages     []Message     `json:"messages" jsonschema:"description=Array of messages between participants,required,minItems=1"`
-	Notes        []Note        `json:"notes,omitempty" jsonschema:"description=Array of notes to add"`
-	Boxes        []Box         `json:"boxes,omitempty" jsonschema:"description=Array of boxes to group participants"`
-	Loops        []Loop        `json:"loops,omitempty" jsonschema:"description=Array of loop blocks"`
-	Alts         []Alt         `json:"alts,omitempty" jsonschema:"description=Array of alt/opt blocks"`
+// SequenceElement represents any element that appears in sequence (messages, create/destroy, etc.)
+type SequenceElement struct {
+	Type     string         `json:"type" jsonschema:"description=Element type,enum=message,enum=create,enum=destroy,enum=loop,enum=alt,enum=parallel,enum=critical,enum=break,enum=rect,enum=note,required"`
+	Message  *Message       `json:"message,omitempty" jsonschema:"description=Message details (when type=message)"`
+	Create   *CreateDestroy `json:"create,omitempty" jsonschema:"description=Create details (when type=create)"`
+	Destroy  *CreateDestroy `json:"destroy,omitempty" jsonschema:"description=Destroy details (when type=destroy)"`
+	Loop     *Loop          `json:"loop,omitempty" jsonschema:"description=Loop details (when type=loop)"`
+	Alt      *Alt           `json:"alt,omitempty" jsonschema:"description=Alt details (when type=alt)"`
+	Parallel *Parallel      `json:"parallel,omitempty" jsonschema:"description=Parallel details (when type=parallel)"`
+	Critical *Critical      `json:"critical,omitempty" jsonschema:"description=Critical details (when type=critical)"`
+	Break    *Break         `json:"break,omitempty" jsonschema:"description=Break details (when type=break)"`
+	Rect     *Rect          `json:"rect,omitempty" jsonschema:"description=Rect details (when type=rect)"`
+	Note     *Note          `json:"note,omitempty" jsonschema:"description=Note details (when type=note)"`
 }
 
-func generateSequenceDiagramDSL(args SequenceDiagramArgs) string {
-	var lines []string
+// Updated CreateDestroy to be simpler
+type CreateDestroy struct {
+	ParticipantID    string `json:"participantId" jsonschema:"description=Participant ID,required"`
+	ParticipantType  string `json:"participantType,omitempty" jsonschema:"description=Type when creating (participant, actor, etc.),enum=participant,enum=actor,enum=boundary,enum=control,enum=entity,enum=database,enum=collections,enum=queue"`
+	ParticipantLabel string `json:"participantLabel,omitempty" jsonschema:"description=Label for the participant (for 'as' syntax)"`
+}
 
-	// start with sequenceDiagram keyword
-	lines = append(lines, "sequenceDiagram")
+// Updated SequenceDiagramArgs to use a sequential approach
+type SequenceDiagramArgs struct {
+	Title        string            `json:"title,omitempty" jsonschema:"description=Diagram title"`
+	AutoNumber   bool              `json:"autoNumber,omitempty" jsonschema:"description=Enable automatic message numbering"`
+	Participants []Participant     `json:"participants,omitempty" jsonschema:"description=Participants to declare at the start (not created dynamically)"`
+	Boxes        []Box             `json:"boxes,omitempty" jsonschema:"description=Boxes to group participants"`
+	Elements     []SequenceElement `json:"elements" jsonschema:"description=Sequence elements in order,required,minItems=1"`
+	Comments     []string          `json:"comments,omitempty" jsonschema:"description=Comments to add at the top"`
+}
 
-	// add title if provided
-	if args.Title != "" {
-		lines = append(lines, fmt.Sprintf("    title: %s", args.Title))
-	}
+// ParallelBranch represents a branch in a parallel block
+type ParallelBranch struct {
+	Text     string    `json:"text" jsonschema:"description=Branch description,required"`
+	Messages []Message `json:"messages" jsonschema:"description=Messages in this parallel branch,required,minItems=1"`
+}
 
-	// add autonumber if enabled
-	if args.AutoNumber {
-		lines = append(lines, "    autonumber")
-	}
+// Parallel represents a parallel execution block
+type Parallel struct {
+	Branches []ParallelBranch `json:"branches" jsonschema:"description=Parallel branches (at least 2 required),required,minItems=2"`
+}
 
-	// add boxes if provided
-	for _, box := range args.Boxes {
-		boxLine := "    box"
-		if box.Color != "" {
-			boxLine += " " + box.Color
-		}
-		if box.Label != "" {
-			boxLine += " " + box.Label
-		}
-		lines = append(lines, boxLine)
+// CriticalOption represents an option in a critical block
+type CriticalOption struct {
+	Text     string    `json:"text" jsonschema:"description=Option description,required"`
+	Messages []Message `json:"messages" jsonschema:"description=Messages in this option,required,minItems=1"`
+}
 
-		// boxes need participant definitions
-		for _, pid := range box.Participants {
-			// find matching participant definition
-			var p *Participant
-			for i := range args.Participants {
-				if args.Participants[i].ID == pid {
-					p = &args.Participants[i]
-					break
-				}
-			}
-			if p != nil {
-				lines = append(lines, formatParticipant(*p))
-			} else {
-				lines = append(lines, fmt.Sprintf("        participant %s", pid))
-			}
-		}
-		lines = append(lines, "    end")
-	}
+// Critical represents a critical region
+type Critical struct {
+	Text     string           `json:"text" jsonschema:"description=Critical action description,required"`
+	Messages []Message        `json:"messages" jsonschema:"description=Messages in critical section,required,minItems=1"`
+	Options  []CriticalOption `json:"options,omitempty" jsonschema:"description=Optional handling options"`
+}
 
-	// add explicit participants (those not in boxes)
-	boxedParticipants := make(map[string]bool)
-	for _, box := range args.Boxes {
-		for _, pid := range box.Participants {
-			boxedParticipants[pid] = true
-		}
-	}
+// Break represents a break/exception in the flow
+type Break struct {
+	Text     string    `json:"text" jsonschema:"description=Break condition description,required"`
+	Messages []Message `json:"messages" jsonschema:"description=Messages before break,required,minItems=1"`
+}
 
-	for _, p := range args.Participants {
-		if !boxedParticipants[p.ID] {
-			lines = append(lines, formatParticipant(p))
-		}
-	}
-
-	// add messages
-	for _, msg := range args.Messages {
-		lines = append(lines, formatMessage(msg))
-	}
-
-	// add loops
-	for _, loop := range args.Loops {
-		lines = append(lines, fmt.Sprintf("    loop %s", loop.Text))
-		for _, msg := range loop.Messages {
-			lines = append(lines, "    "+formatMessage(msg))
-		}
-		lines = append(lines, "    end")
-	}
-
-	// add alts
-	for _, alt := range args.Alts {
-		lines = append(lines, fmt.Sprintf("    alt %s", alt.IfText))
-		for _, msg := range alt.IfMessages {
-			lines = append(lines, "    "+formatMessage(msg))
-		}
-		if alt.ElseText != "" {
-			lines = append(lines, fmt.Sprintf("    else %s", alt.ElseText))
-			for _, msg := range alt.ElseMessages {
-				lines = append(lines, "    "+formatMessage(msg))
-			}
-		}
-		lines = append(lines, "    end")
-	}
-
-	// add notes
-	for _, note := range args.Notes {
-		lines = append(lines, formatNote(note))
-	}
-
-	return strings.Join(lines, "\n")
+// Rect represents a background highlight rectangle
+type Rect struct {
+	Color    string    `json:"color" jsonschema:"description=Rectangle color in rgb(r,g,b) or rgba(r,g,b,a) format,required,pattern=^rgba?\\([0-9]{1\\,3}\\,[0-9]{1\\,3}\\,[0-9]{1\\,3}(\\,[0-9\\.]+)?\\)$"`
+	Messages []Message `json:"messages" jsonschema:"description=Messages within the highlighted area,required,minItems=1"`
 }
 
 func formatParticipant(p Participant) string {
@@ -197,86 +157,29 @@ func formatNote(note Note) string {
 	return fmt.Sprintf("    Note %s %s: %s", note.Position, participantPart, note.Text)
 }
 
-func validateSequenceDiagramArgs(args SequenceDiagramArgs) error {
-	if len(args.Messages) == 0 {
-		return fmt.Errorf("messages must contain at least one item")
+var rgbRegex = regexp.MustCompile(`^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*[0-9.]+\s*)?\)$`)
+
+var validColors = map[string]bool{
+	"Aqua": true, "Black": true, "Blue": true, "Brown": true,
+	"Cyan": true, "Gray": true, "Grey": true, "Green": true,
+	"Lime": true, "Magenta": true, "Navy": true, "Orange": true,
+	"Pink": true, "Purple": true, "Red": true, "Silver": true,
+	"White": true, "Yellow": true, "Teal": true, "Indigo": true,
+}
+
+func isValidColor(color string) bool {
+	// check for transparent
+	if color == "transparent" {
+		return true
 	}
 
-	// validate participants referenced in messages exist
-	participantIDs := make(map[string]bool)
-	for _, p := range args.Participants {
-		if p.ID == "" {
-			return fmt.Errorf("participant ID cannot be empty")
-		}
-		participantIDs[p.ID] = true
+	// check for rgb/rgba format
+	if rgbRegex.MatchString(color) {
+		return true
 	}
 
-	// collect all participant IDs from messages (auto-participants)
-	for _, msg := range args.Messages {
-		if msg.From == "" {
-			return fmt.Errorf("message 'from' field cannot be empty")
-		}
-		if msg.To == "" {
-			return fmt.Errorf("message 'to' field cannot be empty")
-		}
-		participantIDs[msg.From] = true
-		participantIDs[msg.To] = true
-	}
-
-	// validate notes reference valid participants
-	for _, note := range args.Notes {
-		if len(note.Participants) == 0 {
-			return fmt.Errorf("note must reference at least one participant")
-		}
-		if note.Position == "over" && len(note.Participants) > 2 {
-			return fmt.Errorf("note 'over' can reference at most two participants")
-		}
-		if (note.Position == "right of" || note.Position == "left of") && len(note.Participants) != 1 {
-			return fmt.Errorf("note '%s' must reference exactly one participant", note.Position)
-		}
-		for _, pid := range note.Participants {
-			if !participantIDs[pid] {
-				return fmt.Errorf("note references unknown participant: %s", pid)
-			}
-		}
-	}
-
-	// validate boxes reference valid participants
-	for _, box := range args.Boxes {
-		if len(box.Participants) == 0 {
-			return fmt.Errorf("box must contain at least one participant")
-		}
-		for _, pid := range box.Participants {
-			if !participantIDs[pid] {
-				return fmt.Errorf("box references unknown participant: %s", pid)
-			}
-		}
-	}
-
-	// validate loops
-	for _, loop := range args.Loops {
-		if loop.Text == "" {
-			return fmt.Errorf("loop text cannot be empty")
-		}
-		if len(loop.Messages) == 0 {
-			return fmt.Errorf("loop must contain at least one message")
-		}
-	}
-
-	// validate alts
-	for _, alt := range args.Alts {
-		if alt.IfText == "" {
-			return fmt.Errorf("alt ifText cannot be empty")
-		}
-		if len(alt.IfMessages) == 0 {
-			return fmt.Errorf("alt must contain at least one message in if block")
-		}
-		if alt.ElseText != "" && len(alt.ElseMessages) == 0 {
-			return fmt.Errorf("alt with elseText must have elseMessages")
-		}
-	}
-
-	return nil
+	// common CSS color names (extend as needed)
+	return validColors[color]
 }
 
 func registerSequenceDiagramTool(srv *server.MCPServer) {
@@ -310,21 +213,333 @@ Key features:
 - Boxes to group related participants
 - Loops for repeated interactions
 - Alt/Opt for conditional flows
+- Parallel blocks for concurrent execution
+- Critical regions with optional circumstances
+- Break blocks for exceptions
+- Background highlighting with colored rectangles
+- Participant creation and destruction
+- Comments for documentation
 - Auto-numbering of messages
 
 Arrow types:
-  ->>  : solid line with arrowhead (default, synchronous call)
-  -->> : dotted line with arrowhead (response/return)
   ->   : solid line without arrow
   -->  : dotted line without arrow
+  ->>  : solid line with arrowhead (default, synchronous call)
+  -->> : dotted line with arrowhead (response/return)
   -x   : solid line with cross (lost message)
   --x  : dotted line with cross
   -)   : solid line with open arrow (asynchronous)
   --)  : dotted line with open arrow
-  <<->>  : bidirectional solid
-  <<-->> : bidirectional dotted`),
+  <<->>  : bidirectional solid (v11.0.0+)
+  <<-->> : bidirectional dotted (v11.0.0+)
+
+Activation suffixes:
+  +    : activate the target
+  -    : deactivate the target`),
 		mcp.WithInputSchema[SequenceDiagramArgs](),
 	)
 
 	srv.AddTool(tool, handler)
+}
+
+func generateSequenceDiagramDSL(args SequenceDiagramArgs) string {
+	var lines []string
+
+	// start with sequenceDiagram keyword
+	lines = append(lines, "sequenceDiagram")
+
+	// add title if provided
+	if args.Title != "" {
+		lines = append(lines, fmt.Sprintf("    title %s", args.Title))
+	}
+
+	// add autonumber if enabled
+	if args.AutoNumber {
+		lines = append(lines, "    autonumber")
+	}
+
+	// add comments at the top if any
+	for _, comment := range args.Comments {
+		lines = append(lines, "    %% "+comment)
+	}
+
+	// add boxes if provided
+	for _, box := range args.Boxes {
+		boxLine := "    box"
+		if box.Color != "" {
+			boxLine += " " + box.Color
+		}
+		if box.Label != "" {
+			boxLine += " " + box.Label
+		}
+		lines = append(lines, boxLine)
+
+		for _, pid := range box.Participants {
+			var p *Participant
+			for i := range args.Participants {
+				if args.Participants[i].ID == pid {
+					p = &args.Participants[i]
+					break
+				}
+			}
+			if p != nil {
+				lines = append(lines, formatParticipant(*p))
+			} else {
+				lines = append(lines, fmt.Sprintf("        participant %s", pid))
+			}
+		}
+		lines = append(lines, "    end")
+	}
+
+	// add explicit participants (those not in boxes)
+	boxedParticipants := make(map[string]bool)
+	for _, box := range args.Boxes {
+		for _, pid := range box.Participants {
+			boxedParticipants[pid] = true
+		}
+	}
+
+	for _, p := range args.Participants {
+		if !boxedParticipants[p.ID] {
+			lines = append(lines, formatParticipant(p))
+		}
+	}
+
+	// process elements in sequence
+	for _, elem := range args.Elements {
+		switch elem.Type {
+		case "message":
+			if elem.Message != nil {
+				lines = append(lines, formatMessage(*elem.Message))
+			}
+		case "create":
+			if elem.Create != nil {
+				createLine := "    create"
+				pType := elem.Create.ParticipantType
+				if pType == "" {
+					pType = "participant"
+				}
+				createLine += " " + pType + " " + elem.Create.ParticipantID
+				if elem.Create.ParticipantLabel != "" {
+					createLine += " as " + elem.Create.ParticipantLabel
+				}
+				lines = append(lines, createLine)
+			}
+		case "destroy":
+			if elem.Destroy != nil {
+				lines = append(lines, fmt.Sprintf("    destroy %s", elem.Destroy.ParticipantID))
+			}
+		case "loop":
+			if elem.Loop != nil {
+				lines = append(lines, fmt.Sprintf("    loop %s", elem.Loop.Text))
+				for _, msg := range elem.Loop.Messages {
+					lines = append(lines, "    "+formatMessage(msg))
+				}
+				lines = append(lines, "    end")
+			}
+		case "alt":
+			if elem.Alt != nil {
+				if elem.Alt.ElseText == "" && len(elem.Alt.ElseMessages) == 0 {
+					lines = append(lines, fmt.Sprintf("    opt %s", elem.Alt.IfText))
+				} else {
+					lines = append(lines, fmt.Sprintf("    alt %s", elem.Alt.IfText))
+				}
+				for _, msg := range elem.Alt.IfMessages {
+					lines = append(lines, "    "+formatMessage(msg))
+				}
+				if elem.Alt.ElseText != "" {
+					lines = append(lines, fmt.Sprintf("    else %s", elem.Alt.ElseText))
+					for _, msg := range elem.Alt.ElseMessages {
+						lines = append(lines, "    "+formatMessage(msg))
+					}
+				}
+				lines = append(lines, "    end")
+			}
+		case "parallel":
+			if elem.Parallel != nil && len(elem.Parallel.Branches) > 0 {
+				lines = append(lines, fmt.Sprintf("    par %s", elem.Parallel.Branches[0].Text))
+				for _, msg := range elem.Parallel.Branches[0].Messages {
+					lines = append(lines, "    "+formatMessage(msg))
+				}
+				for i := 1; i < len(elem.Parallel.Branches); i++ {
+					lines = append(lines, fmt.Sprintf("    and %s", elem.Parallel.Branches[i].Text))
+					for _, msg := range elem.Parallel.Branches[i].Messages {
+						lines = append(lines, "    "+formatMessage(msg))
+					}
+				}
+				lines = append(lines, "    end")
+			}
+		case "critical":
+			if elem.Critical != nil {
+				lines = append(lines, fmt.Sprintf("    critical %s", elem.Critical.Text))
+				for _, msg := range elem.Critical.Messages {
+					lines = append(lines, "    "+formatMessage(msg))
+				}
+				for _, opt := range elem.Critical.Options {
+					lines = append(lines, fmt.Sprintf("    option %s", opt.Text))
+					for _, msg := range opt.Messages {
+						lines = append(lines, "    "+formatMessage(msg))
+					}
+				}
+				lines = append(lines, "    end")
+			}
+		case "break":
+			if elem.Break != nil {
+				lines = append(lines, fmt.Sprintf("    break %s", elem.Break.Text))
+				for _, msg := range elem.Break.Messages {
+					lines = append(lines, "    "+formatMessage(msg))
+				}
+				lines = append(lines, "    end")
+			}
+		case "rect":
+			if elem.Rect != nil {
+				lines = append(lines, fmt.Sprintf("    rect %s", elem.Rect.Color))
+				for _, msg := range elem.Rect.Messages {
+					lines = append(lines, "    "+formatMessage(msg))
+				}
+				lines = append(lines, "    end")
+			}
+		case "note":
+			if elem.Note != nil {
+				lines = append(lines, formatNote(*elem.Note))
+			}
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func validateSequenceDiagramArgs(args SequenceDiagramArgs) error {
+	if len(args.Elements) == 0 {
+		return fmt.Errorf("elements must contain at least one item")
+	}
+
+	// track active participants (created but not destroyed)
+	activeParticipants := make(map[string]bool)
+
+	// add pre-declared participants
+	for _, p := range args.Participants {
+		if p.ID == "" {
+			return fmt.Errorf("participant ID cannot be empty")
+		}
+		activeParticipants[p.ID] = true
+	}
+
+	// add participants from boxes
+	for _, box := range args.Boxes {
+		for _, pid := range box.Participants {
+			activeParticipants[pid] = true
+		}
+	}
+
+	// validate elements in sequence
+	for i, elem := range args.Elements {
+		switch elem.Type {
+		case "message":
+			if elem.Message == nil {
+				return fmt.Errorf("element %d: message element must have message details", i)
+			}
+			msg := elem.Message
+			if msg.From == "" || msg.To == "" || msg.Text == "" {
+				return fmt.Errorf("element %d: message must have from, to, and text fields", i)
+			}
+
+			// auto-add participants if not explicitly declared
+			if !activeParticipants[msg.From] {
+				activeParticipants[msg.From] = true
+			}
+			if !activeParticipants[msg.To] {
+				activeParticipants[msg.To] = true
+			}
+
+			if msg.Activate && msg.Deactivate {
+				return fmt.Errorf("element %d: message cannot both activate and deactivate", i)
+			}
+
+			// validate arrow type
+			if msg.ArrowType != "" {
+				validArrowTypes := map[string]bool{
+					"->": true, "-->": true, "->>": true, "-->>": true,
+					"-x": true, "--x": true, "-)": true, "--)": true,
+					"<<->>": true, "<<-->>": true,
+				}
+				if !validArrowTypes[msg.ArrowType] {
+					return fmt.Errorf("element %d: invalid arrow type: %s", i, msg.ArrowType)
+				}
+			}
+
+		case "create":
+			if elem.Create == nil {
+				return fmt.Errorf("element %d: create element must have create details", i)
+			}
+			if elem.Create.ParticipantID == "" {
+				return fmt.Errorf("element %d: create participant ID cannot be empty", i)
+			}
+			if activeParticipants[elem.Create.ParticipantID] {
+				return fmt.Errorf("element %d: cannot create participant %s - already exists", i, elem.Create.ParticipantID)
+			}
+			activeParticipants[elem.Create.ParticipantID] = true
+
+		case "destroy":
+			if elem.Destroy == nil {
+				return fmt.Errorf("element %d: destroy element must have destroy details", i)
+			}
+			if elem.Destroy.ParticipantID == "" {
+				return fmt.Errorf("element %d: destroy participant ID cannot be empty", i)
+			}
+			if !activeParticipants[elem.Destroy.ParticipantID] {
+				return fmt.Errorf("element %d: cannot destroy participant %s - does not exist", i, elem.Destroy.ParticipantID)
+			}
+			delete(activeParticipants, elem.Destroy.ParticipantID)
+
+		case "loop":
+			if elem.Loop == nil {
+				return fmt.Errorf("element %d: loop element must have loop details", i)
+			}
+			if elem.Loop.Text == "" {
+				return fmt.Errorf("element %d: loop text cannot be empty", i)
+			}
+			if len(elem.Loop.Messages) == 0 {
+				return fmt.Errorf("element %d: loop must contain at least one message", i)
+			}
+
+		case "alt":
+			if elem.Alt == nil {
+				return fmt.Errorf("element %d: alt element must have alt details", i)
+			}
+			if elem.Alt.IfText == "" {
+				return fmt.Errorf("element %d: alt ifText cannot be empty", i)
+			}
+			if len(elem.Alt.IfMessages) == 0 {
+				return fmt.Errorf("element %d: alt must have at least one if message", i)
+			}
+
+		case "note":
+			if elem.Note == nil {
+				return fmt.Errorf("element %d: note element must have note details", i)
+			}
+			if elem.Note.Text == "" {
+				return fmt.Errorf("element %d: note text cannot be empty", i)
+			}
+			// validate note participants exist
+			for _, pid := range elem.Note.Participants {
+				if !activeParticipants[pid] {
+					return fmt.Errorf("element %d: note references unknown participant: %s", i, pid)
+				}
+			}
+
+		}
+	}
+
+	// validate boxes reference valid participants
+	for _, box := range args.Boxes {
+		if len(box.Participants) == 0 {
+			return fmt.Errorf("box must contain at least one participant")
+		}
+		if box.Color != "" && !isValidColor(box.Color) {
+			return fmt.Errorf("invalid box color: %s", box.Color)
+		}
+	}
+
+	return nil
 }

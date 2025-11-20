@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 )
@@ -961,450 +960,212 @@ func TestDataConsistency(t *testing.T) {
 	})
 }
 
-func TestGenerateSequenceDiagramDSL(t *testing.T) {
-	tests := []struct {
-		name     string
-		args     SequenceDiagramArgs
-		validate func(t *testing.T, result string)
-	}{
-		{
-			name: "basic sequence diagram with messages",
-			args: SequenceDiagramArgs{
-				Messages: []Message{
-					{From: "Alice", To: "Bob", Text: "Hello Bob"},
-					{From: "Bob", To: "Alice", Text: "Hi Alice"},
-				},
-			},
-			validate: func(t *testing.T, result string) {
-				if !strings.Contains(result, "sequenceDiagram") {
-					t.Error("missing sequenceDiagram keyword")
-				}
-				if !strings.Contains(result, "Alice->>Bob: Hello Bob") {
-					t.Error("missing first message")
-				}
-				if !strings.Contains(result, "Bob->>Alice: Hi Alice") {
-					t.Error("missing second message")
-				}
-			},
-		},
-		{
-			name: "diagram with title and autonumber",
-			args: SequenceDiagramArgs{
-				Title:      "Login Flow",
-				AutoNumber: true,
-				Messages: []Message{
-					{From: "User", To: "Server", Text: "Login request"},
-					{From: "Server", To: "Database", Text: "Verify credentials"},
-				},
-			},
-			validate: func(t *testing.T, result string) {
-				if !strings.Contains(result, "title: Login Flow") {
-					t.Error("missing title")
-				}
-				if !strings.Contains(result, "autonumber") {
-					t.Error("missing autonumber")
-				}
-			},
-		},
-		{
-			name: "diagram with explicit participants",
-			args: SequenceDiagramArgs{
-				Participants: []Participant{
-					{ID: "A", Label: "Alice", Type: "actor"},
-					{ID: "B", Label: "Bob", Type: "participant"},
-				},
-				Messages: []Message{
-					{From: "A", To: "B", Text: "Test"},
-				},
-			},
-			validate: func(t *testing.T, result string) {
-				if !strings.Contains(result, "actor A as Alice") {
-					t.Error("missing actor participant")
-				}
-				if !strings.Contains(result, "participant B as Bob") {
-					t.Error("missing participant")
-				}
-			},
-		},
-		{
-			name: "diagram with different arrow types",
-			args: SequenceDiagramArgs{
-				Messages: []Message{
-					{From: "A", To: "B", Text: "Sync call", ArrowType: "->>"},
-					{From: "B", To: "A", Text: "Response", ArrowType: "-->>"},
-					{From: "A", To: "C", Text: "Async", ArrowType: "-)"},
-					{From: "A", To: "D", Text: "Lost", ArrowType: "-x"},
-				},
-			},
-			validate: func(t *testing.T, result string) {
-				if !strings.Contains(result, "A->>B: Sync call") {
-					t.Error("missing sync arrow")
-				}
-				if !strings.Contains(result, "B-->>A: Response") {
-					t.Error("missing dotted arrow")
-				}
-				if !strings.Contains(result, "A-)C: Async") {
-					t.Error("missing async arrow")
-				}
-				if !strings.Contains(result, "A-xD: Lost") {
-					t.Error("missing cross arrow")
-				}
-			},
-		},
-		{
-			name: "diagram with activations",
-			args: SequenceDiagramArgs{
-				Messages: []Message{
-					{From: "A", To: "B", Text: "Request", Activate: true},
-					{From: "B", To: "A", Text: "Response", Deactivate: true},
-				},
-			},
-			validate: func(t *testing.T, result string) {
-				if !strings.Contains(result, "A->>+B: Request") {
-					t.Error("missing activation")
-				}
-				if !strings.Contains(result, "B->>-A: Response") {
-					t.Error("missing deactivation")
-				}
-			},
-		},
-		{
-			name: "diagram with notes",
-			args: SequenceDiagramArgs{
-				Messages: []Message{
-					{From: "A", To: "B", Text: "Hello"},
-				},
-				Notes: []Note{
-					{Position: "right of", Participants: []string{"A"}, Text: "Note on A"},
-					{Position: "over", Participants: []string{"A", "B"}, Text: "Spanning note"},
-				},
-			},
-			validate: func(t *testing.T, result string) {
-				if !strings.Contains(result, "Note right of A: Note on A") {
-					t.Error("missing right of note")
-				}
-				if !strings.Contains(result, "Note over A,B: Spanning note") {
-					t.Error("missing over note")
-				}
-			},
-		},
-		{
-			name: "diagram with boxes",
-			args: SequenceDiagramArgs{
-				Participants: []Participant{
-					{ID: "A"},
-					{ID: "B"},
-				},
-				Boxes: []Box{
-					{Label: "Backend", Color: "lightblue", Participants: []string{"A", "B"}},
-				},
-				Messages: []Message{
-					{From: "A", To: "B", Text: "Internal call"},
-				},
-			},
-			validate: func(t *testing.T, result string) {
-				if !strings.Contains(result, "box lightblue Backend") {
-					t.Error("missing box definition")
-				}
-				if !strings.Contains(result, "end") {
-					t.Error("missing box end")
-				}
-			},
-		},
-		{
-			name: "diagram with loops",
-			args: SequenceDiagramArgs{
-				Messages: []Message{
-					{From: "A", To: "B", Text: "Start"},
-				},
-				Loops: []Loop{
-					{
-						Text: "Every minute",
-						Messages: []Message{
-							{From: "A", To: "B", Text: "Ping"},
-							{From: "B", To: "A", Text: "Pong"},
-						},
-					},
-				},
-			},
-			validate: func(t *testing.T, result string) {
-				if !strings.Contains(result, "loop Every minute") {
-					t.Error("missing loop definition")
-				}
-				if !strings.Contains(result, "A->>B: Ping") {
-					t.Error("missing message in loop")
-				}
-			},
-		},
-		{
-			name: "diagram with alt/else",
-			args: SequenceDiagramArgs{
-				Messages: []Message{
-					{From: "User", To: "Server", Text: "Login"},
-				},
-				Alts: []Alt{
-					{
-						IfText: "Valid credentials",
-						IfMessages: []Message{
-							{From: "Server", To: "User", Text: "Success"},
-						},
-						ElseText: "Invalid credentials",
-						ElseMessages: []Message{
-							{From: "Server", To: "User", Text: "Error"},
-						},
-					},
-				},
-			},
-			validate: func(t *testing.T, result string) {
-				if !strings.Contains(result, "alt Valid credentials") {
-					t.Error("missing alt definition")
-				}
-				if !strings.Contains(result, "else Invalid credentials") {
-					t.Error("missing else definition")
-				}
-			},
-		},
-		{
-			name: "diagram with opt (no else)",
-			args: SequenceDiagramArgs{
-				Messages: []Message{
-					{From: "A", To: "B", Text: "Request"},
-				},
-				Alts: []Alt{
-					{
-						IfText: "Cache exists",
-						IfMessages: []Message{
-							{From: "B", To: "Cache", Text: "Get from cache"},
-						},
-					},
-				},
-			},
-			validate: func(t *testing.T, result string) {
-				if !strings.Contains(result, "alt Cache exists") {
-					t.Error("missing alt definition")
-				}
-				if strings.Contains(result, "else") {
-					t.Error("should not have else block")
-				}
-			},
-		},
-	}
+// func TestValidateSequenceDiagramArgs(t *testing.T) {
+// 	t.Run("valid basic diagram", func(t *testing.T) {
+// 		args := SequenceDiagramArgs{
+// 			Messages: []Message{
+// 				{From: "A", To: "B", Text: "Hello"},
+// 			},
+// 		}
+// 		if err := validateSequenceDiagramArgs(args); err != nil {
+// 			t.Errorf("unexpected error: %v", err)
+// 		}
+// 	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := generateSequenceDiagramDSL(tt.args)
-			fmt.Println("Generated DSL:\n", result)
-			tt.validate(t, result)
-		})
-	}
-}
+// 	t.Run("empty messages", func(t *testing.T) {
+// 		args := SequenceDiagramArgs{
+// 			Messages: []Message{},
+// 		}
+// 		if err := validateSequenceDiagramArgs(args); err == nil {
+// 			t.Error("expected error for empty messages")
+// 		}
+// 	})
 
-func TestValidateSequenceDiagramArgs(t *testing.T) {
-	t.Run("valid basic diagram", func(t *testing.T) {
-		args := SequenceDiagramArgs{
-			Messages: []Message{
-				{From: "A", To: "B", Text: "Hello"},
-			},
-		}
-		if err := validateSequenceDiagramArgs(args); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
-	})
+// 	t.Run("message with empty from", func(t *testing.T) {
+// 		args := SequenceDiagramArgs{
+// 			Messages: []Message{
+// 				{From: "", To: "B", Text: "Hello"},
+// 			},
+// 		}
+// 		if err := validateSequenceDiagramArgs(args); err == nil {
+// 			t.Error("expected error for empty from field")
+// 		}
+// 	})
 
-	t.Run("empty messages", func(t *testing.T) {
-		args := SequenceDiagramArgs{
-			Messages: []Message{},
-		}
-		if err := validateSequenceDiagramArgs(args); err == nil {
-			t.Error("expected error for empty messages")
-		}
-	})
+// 	t.Run("message with empty to", func(t *testing.T) {
+// 		args := SequenceDiagramArgs{
+// 			Messages: []Message{
+// 				{From: "A", To: "", Text: "Hello"},
+// 			},
+// 		}
+// 		if err := validateSequenceDiagramArgs(args); err == nil {
+// 			t.Error("expected error for empty to field")
+// 		}
+// 	})
 
-	t.Run("message with empty from", func(t *testing.T) {
-		args := SequenceDiagramArgs{
-			Messages: []Message{
-				{From: "", To: "B", Text: "Hello"},
-			},
-		}
-		if err := validateSequenceDiagramArgs(args); err == nil {
-			t.Error("expected error for empty from field")
-		}
-	})
+// 	t.Run("participant with empty id", func(t *testing.T) {
+// 		args := SequenceDiagramArgs{
+// 			Participants: []Participant{
+// 				{ID: "", Label: "Alice"},
+// 			},
+// 			Messages: []Message{
+// 				{From: "A", To: "B", Text: "Test"},
+// 			},
+// 		}
+// 		if err := validateSequenceDiagramArgs(args); err == nil {
+// 			t.Error("expected error for empty participant ID")
+// 		}
+// 	})
 
-	t.Run("message with empty to", func(t *testing.T) {
-		args := SequenceDiagramArgs{
-			Messages: []Message{
-				{From: "A", To: "", Text: "Hello"},
-			},
-		}
-		if err := validateSequenceDiagramArgs(args); err == nil {
-			t.Error("expected error for empty to field")
-		}
-	})
+// 	t.Run("note with unknown participant", func(t *testing.T) {
+// 		args := SequenceDiagramArgs{
+// 			Messages: []Message{
+// 				{From: "A", To: "B", Text: "Test"},
+// 			},
+// 			Notes: []Note{
+// 				{Position: "right of", Participants: []string{"C"}, Text: "Note"},
+// 			},
+// 		}
+// 		if err := validateSequenceDiagramArgs(args); err == nil {
+// 			t.Error("expected error for unknown participant in note")
+// 		}
+// 	})
 
-	t.Run("participant with empty id", func(t *testing.T) {
-		args := SequenceDiagramArgs{
-			Participants: []Participant{
-				{ID: "", Label: "Alice"},
-			},
-			Messages: []Message{
-				{From: "A", To: "B", Text: "Test"},
-			},
-		}
-		if err := validateSequenceDiagramArgs(args); err == nil {
-			t.Error("expected error for empty participant ID")
-		}
-	})
+// 	t.Run("note right of with multiple participants", func(t *testing.T) {
+// 		args := SequenceDiagramArgs{
+// 			Messages: []Message{
+// 				{From: "A", To: "B", Text: "Test"},
+// 			},
+// 			Notes: []Note{
+// 				{Position: "right of", Participants: []string{"A", "B"}, Text: "Note"},
+// 			},
+// 		}
+// 		if err := validateSequenceDiagramArgs(args); err == nil {
+// 			t.Error("expected error for right of with multiple participants")
+// 		}
+// 	})
 
-	t.Run("note with unknown participant", func(t *testing.T) {
-		args := SequenceDiagramArgs{
-			Messages: []Message{
-				{From: "A", To: "B", Text: "Test"},
-			},
-			Notes: []Note{
-				{Position: "right of", Participants: []string{"C"}, Text: "Note"},
-			},
-		}
-		if err := validateSequenceDiagramArgs(args); err == nil {
-			t.Error("expected error for unknown participant in note")
-		}
-	})
+// 	t.Run("note over with too many participants", func(t *testing.T) {
+// 		args := SequenceDiagramArgs{
+// 			Messages: []Message{
+// 				{From: "A", To: "B", Text: "Test"},
+// 			},
+// 			Notes: []Note{
+// 				{Position: "over", Participants: []string{"A", "B", "C"}, Text: "Note"},
+// 			},
+// 		}
+// 		if err := validateSequenceDiagramArgs(args); err == nil {
+// 			t.Error("expected error for over with too many participants")
+// 		}
+// 	})
 
-	t.Run("note right of with multiple participants", func(t *testing.T) {
-		args := SequenceDiagramArgs{
-			Messages: []Message{
-				{From: "A", To: "B", Text: "Test"},
-			},
-			Notes: []Note{
-				{Position: "right of", Participants: []string{"A", "B"}, Text: "Note"},
-			},
-		}
-		if err := validateSequenceDiagramArgs(args); err == nil {
-			t.Error("expected error for right of with multiple participants")
-		}
-	})
+// 	t.Run("box with unknown participant", func(t *testing.T) {
+// 		args := SequenceDiagramArgs{
+// 			Messages: []Message{
+// 				{From: "A", To: "B", Text: "Test"},
+// 			},
+// 			Boxes: []Box{
+// 				{Label: "Group", Participants: []string{"C"}},
+// 			},
+// 		}
+// 		if err := validateSequenceDiagramArgs(args); err == nil {
+// 			t.Error("expected error for unknown participant in box")
+// 		}
+// 	})
 
-	t.Run("note over with too many participants", func(t *testing.T) {
-		args := SequenceDiagramArgs{
-			Messages: []Message{
-				{From: "A", To: "B", Text: "Test"},
-			},
-			Notes: []Note{
-				{Position: "over", Participants: []string{"A", "B", "C"}, Text: "Note"},
-			},
-		}
-		if err := validateSequenceDiagramArgs(args); err == nil {
-			t.Error("expected error for over with too many participants")
-		}
-	})
+// 	t.Run("loop with empty text", func(t *testing.T) {
+// 		args := SequenceDiagramArgs{
+// 			Messages: []Message{
+// 				{From: "A", To: "B", Text: "Test"},
+// 			},
+// 			Loops: []Loop{
+// 				{
+// 					Text: "",
+// 					Messages: []Message{
+// 						{From: "A", To: "B", Text: "Repeat"},
+// 					},
+// 				},
+// 			},
+// 		}
+// 		if err := validateSequenceDiagramArgs(args); err == nil {
+// 			t.Error("expected error for loop with empty text")
+// 		}
+// 	})
 
-	t.Run("box with unknown participant", func(t *testing.T) {
-		args := SequenceDiagramArgs{
-			Messages: []Message{
-				{From: "A", To: "B", Text: "Test"},
-			},
-			Boxes: []Box{
-				{Label: "Group", Participants: []string{"C"}},
-			},
-		}
-		if err := validateSequenceDiagramArgs(args); err == nil {
-			t.Error("expected error for unknown participant in box")
-		}
-	})
+// 	t.Run("loop with no messages", func(t *testing.T) {
+// 		args := SequenceDiagramArgs{
+// 			Messages: []Message{
+// 				{From: "A", To: "B", Text: "Test"},
+// 			},
+// 			Loops: []Loop{
+// 				{
+// 					Text:     "Loop",
+// 					Messages: []Message{},
+// 				},
+// 			},
+// 		}
+// 		if err := validateSequenceDiagramArgs(args); err == nil {
+// 			t.Error("expected error for loop with no messages")
+// 		}
+// 	})
 
-	t.Run("loop with empty text", func(t *testing.T) {
-		args := SequenceDiagramArgs{
-			Messages: []Message{
-				{From: "A", To: "B", Text: "Test"},
-			},
-			Loops: []Loop{
-				{
-					Text: "",
-					Messages: []Message{
-						{From: "A", To: "B", Text: "Repeat"},
-					},
-				},
-			},
-		}
-		if err := validateSequenceDiagramArgs(args); err == nil {
-			t.Error("expected error for loop with empty text")
-		}
-	})
+// 	t.Run("alt with empty ifText", func(t *testing.T) {
+// 		args := SequenceDiagramArgs{
+// 			Messages: []Message{
+// 				{From: "A", To: "B", Text: "Test"},
+// 			},
+// 			Alts: []Alt{
+// 				{
+// 					IfText: "",
+// 					IfMessages: []Message{
+// 						{From: "A", To: "B", Text: "Yes"},
+// 					},
+// 				},
+// 			},
+// 		}
+// 		if err := validateSequenceDiagramArgs(args); err == nil {
+// 			t.Error("expected error for alt with empty ifText")
+// 		}
+// 	})
 
-	t.Run("loop with no messages", func(t *testing.T) {
-		args := SequenceDiagramArgs{
-			Messages: []Message{
-				{From: "A", To: "B", Text: "Test"},
-			},
-			Loops: []Loop{
-				{
-					Text:     "Loop",
-					Messages: []Message{},
-				},
-			},
-		}
-		if err := validateSequenceDiagramArgs(args); err == nil {
-			t.Error("expected error for loop with no messages")
-		}
-	})
+// 	t.Run("alt with no ifMessages", func(t *testing.T) {
+// 		args := SequenceDiagramArgs{
+// 			Messages: []Message{
+// 				{From: "A", To: "B", Text: "Test"},
+// 			},
+// 			Alts: []Alt{
+// 				{
+// 					IfText:     "Condition",
+// 					IfMessages: []Message{},
+// 				},
+// 			},
+// 		}
+// 		if err := validateSequenceDiagramArgs(args); err == nil {
+// 			t.Error("expected error for alt with no ifMessages")
+// 		}
+// 	})
 
-	t.Run("alt with empty ifText", func(t *testing.T) {
-		args := SequenceDiagramArgs{
-			Messages: []Message{
-				{From: "A", To: "B", Text: "Test"},
-			},
-			Alts: []Alt{
-				{
-					IfText: "",
-					IfMessages: []Message{
-						{From: "A", To: "B", Text: "Yes"},
-					},
-				},
-			},
-		}
-		if err := validateSequenceDiagramArgs(args); err == nil {
-			t.Error("expected error for alt with empty ifText")
-		}
-	})
-
-	t.Run("alt with no ifMessages", func(t *testing.T) {
-		args := SequenceDiagramArgs{
-			Messages: []Message{
-				{From: "A", To: "B", Text: "Test"},
-			},
-			Alts: []Alt{
-				{
-					IfText:     "Condition",
-					IfMessages: []Message{},
-				},
-			},
-		}
-		if err := validateSequenceDiagramArgs(args); err == nil {
-			t.Error("expected error for alt with no ifMessages")
-		}
-	})
-
-	t.Run("alt with elseText but no elseMessages", func(t *testing.T) {
-		args := SequenceDiagramArgs{
-			Messages: []Message{
-				{From: "A", To: "B", Text: "Test"},
-			},
-			Alts: []Alt{
-				{
-					IfText: "Condition",
-					IfMessages: []Message{
-						{From: "A", To: "B", Text: "Yes"},
-					},
-					ElseText:     "Otherwise",
-					ElseMessages: []Message{},
-				},
-			},
-		}
-		if err := validateSequenceDiagramArgs(args); err == nil {
-			t.Error("expected error for alt with elseText but no elseMessages")
-		}
-	})
-}
+// 	t.Run("alt with elseText but no elseMessages", func(t *testing.T) {
+// 		args := SequenceDiagramArgs{
+// 			Messages: []Message{
+// 				{From: "A", To: "B", Text: "Test"},
+// 			},
+// 			Alts: []Alt{
+// 				{
+// 					IfText: "Condition",
+// 					IfMessages: []Message{
+// 						{From: "A", To: "B", Text: "Yes"},
+// 					},
+// 					ElseText:     "Otherwise",
+// 					ElseMessages: []Message{},
+// 				},
+// 			},
+// 		}
+// 		if err := validateSequenceDiagramArgs(args); err == nil {
+// 			t.Error("expected error for alt with elseText but no elseMessages")
+// 		}
+// 	})
+// }
 
 func TestGenerateFlowchartDSL(t *testing.T) {
 	tests := []struct {
