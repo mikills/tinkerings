@@ -12,9 +12,11 @@ type PiePoint struct {
 }
 
 type PieChartArgs struct {
-	Title        string     `json:"title,omitempty" jsonschema:"description=Chart title"`
-	DatasetLabel string     `json:"datasetLabel,omitempty" jsonschema:"description=Label for the data series"`
-	Points       []PiePoint `json:"points" jsonschema:"description=Array of data points with labels and values,minItems=1"`
+	Title            string     `json:"title,omitempty" jsonschema:"description=Chart title"`
+	DatasetLabel     string     `json:"datasetLabel,omitempty" jsonschema:"description=Label for the data series"`
+	Points           []PiePoint `json:"points" jsonschema:"description=Array of data points with labels and values,minItems=1"`
+	BackgroundColors []string   `json:"backgroundColors,omitempty" jsonschema:"description=Optional array of background colors for pie segments (e.g. ['rgba(255, 99, 132, 0.8)', '#FF6384']). If not provided, uses default color palette."`
+	BorderColors     []string   `json:"borderColors,omitempty" jsonschema:"description=Optional array of border colors for pie segments. If not provided, uses default color palette."`
 }
 
 func generatePieChartJSON(args PieChartArgs) map[string]any {
@@ -31,13 +33,19 @@ func generatePieChartJSON(args PieChartArgs) map[string]any {
 		datasetLabel = "Dataset"
 	}
 
+	backgroundColor := getColors(args.BackgroundColors, len(args.Points))
+	borderColor := getBorderColors(args.BorderColors, len(args.Points))
+
 	return map[string]any{
 		"type": "pie",
 		"data": map[string]any{
 			"labels": labels,
 			"datasets": []map[string]any{{
-				"label": datasetLabel,
-				"data":  data,
+				"label":           datasetLabel,
+				"data":            data,
+				"backgroundColor": backgroundColor,
+				"borderColor":     borderColor,
+				"borderWidth":     1,
 			}},
 		},
 		"options": map[string]any{

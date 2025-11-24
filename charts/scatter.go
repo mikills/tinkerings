@@ -12,9 +12,11 @@ type ScatterPoint struct {
 }
 
 type ScatterChartArgs struct {
-	Title        string         `json:"title,omitempty" jsonschema:"description=Chart title"`
-	DatasetLabel string         `json:"datasetLabel,omitempty" jsonschema:"description=Label for the data series"`
-	Points       []ScatterPoint `json:"points" jsonschema:"description=Array of data points with x and y numeric values,minItems=1"`
+	Title           string         `json:"title,omitempty" jsonschema:"description=Chart title"`
+	DatasetLabel    string         `json:"datasetLabel,omitempty" jsonschema:"description=Label for the data series"`
+	Points          []ScatterPoint `json:"points" jsonschema:"description=Array of data points with x and y numeric values,minItems=1"`
+	BackgroundColor string         `json:"backgroundColor,omitempty" jsonschema:"description=Optional background color for points (e.g. 'rgba(255, 99, 132, 0.8)', '#FF6384'). If not provided, uses default color palette."`
+	BorderColor     string         `json:"borderColor,omitempty" jsonschema:"description=Optional border color for points. If not provided, uses default color palette."`
 }
 
 func generateScatterChartJSON(args ScatterChartArgs) map[string]any {
@@ -32,12 +34,17 @@ func generateScatterChartJSON(args ScatterChartArgs) map[string]any {
 		datasetLabel = "Series 1"
 	}
 
+	backgroundColor := getSingleColor([]string{args.BackgroundColor}, 0)
+	borderColor := getSingleBorderColor([]string{args.BorderColor}, 0)
+
 	return map[string]any{
 		"type": "scatter",
 		"data": map[string]any{
 			"datasets": []map[string]any{{
-				"label": datasetLabel,
-				"data":  data,
+				"label":           datasetLabel,
+				"data":            data,
+				"backgroundColor": backgroundColor,
+				"borderColor":     borderColor,
 			}},
 		},
 		"options": map[string]any{
