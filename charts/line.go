@@ -12,9 +12,11 @@ type LinePoint struct {
 }
 
 type LineChartArgs struct {
-	Title        string      `json:"title,omitempty" jsonschema:"description=Chart title"`
-	DatasetLabel string      `json:"datasetLabel,omitempty" jsonschema:"description=Label for the data series"`
-	Points       []LinePoint `json:"points" jsonschema:"description=Array of data points,minItems=1"`
+	Title           string      `json:"title,omitempty" jsonschema:"description=Chart title"`
+	DatasetLabel    string      `json:"datasetLabel,omitempty" jsonschema:"description=Label for the data series"`
+	Points          []LinePoint `json:"points" jsonschema:"description=Array of data points,minItems=1"`
+	BackgroundColor string      `json:"backgroundColor,omitempty" jsonschema:"description=Optional background color for points (e.g. 'rgba(255, 99, 132, 0.8)', '#FF6384'). If not provided, uses default color palette."`
+	BorderColor     string      `json:"borderColor,omitempty" jsonschema:"description=Optional line color. If not provided, uses default color palette."`
 }
 
 func generateLineChartJSON(args LineChartArgs) map[string]any {
@@ -31,13 +33,19 @@ func generateLineChartJSON(args LineChartArgs) map[string]any {
 		datasetLabel = "Series 1"
 	}
 
+	backgroundColor := getSingleColor([]string{args.BackgroundColor}, 0)
+	borderColor := getSingleBorderColor([]string{args.BorderColor}, 0)
+
 	return map[string]any{
 		"type": "line",
 		"data": map[string]any{
 			"labels": labels,
 			"datasets": []map[string]any{{
-				"label": datasetLabel,
-				"data":  data,
+				"label":           datasetLabel,
+				"data":            data,
+				"backgroundColor": backgroundColor,
+				"borderColor":     borderColor,
+				"borderWidth":     2,
 			}},
 		},
 		"options": map[string]any{

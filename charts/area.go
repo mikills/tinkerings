@@ -12,9 +12,11 @@ type AreaPoint struct {
 }
 
 type AreaChartArgs struct {
-	Title        string      `json:"title,omitempty" jsonschema:"description=Chart title"`
-	DatasetLabel string      `json:"datasetLabel,omitempty" jsonschema:"description=Label for the data series"`
-	Points       []AreaPoint `json:"points" jsonschema:"description=Array of data points,minItems=1"`
+	Title           string      `json:"title,omitempty" jsonschema:"description=Chart title"`
+	DatasetLabel    string      `json:"datasetLabel,omitempty" jsonschema:"description=Label for the data series"`
+	Points          []AreaPoint `json:"points" jsonschema:"description=Array of data points,minItems=1"`
+	BackgroundColor string      `json:"backgroundColor,omitempty" jsonschema:"description=Optional background color for the area fill (e.g. 'rgba(255, 99, 132, 0.2)', '#FF638440'). If not provided, uses default color palette with transparency."`
+	BorderColor     string      `json:"borderColor,omitempty" jsonschema:"description=Optional border/line color. If not provided, uses default color palette."`
 }
 
 func generateAreaChartJSON(args AreaChartArgs) map[string]any {
@@ -31,14 +33,20 @@ func generateAreaChartJSON(args AreaChartArgs) map[string]any {
 		datasetLabel = "Series 1"
 	}
 
+	backgroundColor := getSingleColor([]string{args.BackgroundColor}, 0)
+	borderColor := getSingleBorderColor([]string{args.BorderColor}, 0)
+
 	return map[string]any{
 		"type": "line",
 		"data": map[string]any{
 			"labels": labels,
 			"datasets": []map[string]any{{
-				"label": datasetLabel,
-				"data":  data,
-				"fill":  true,
+				"label":           datasetLabel,
+				"data":            data,
+				"fill":            true,
+				"backgroundColor": backgroundColor,
+				"borderColor":     borderColor,
+				"borderWidth":     2,
 			}},
 		},
 		"options": map[string]any{
