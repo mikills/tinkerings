@@ -11,7 +11,6 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -57,7 +56,7 @@ func setupMongo(t *testing.T, ctx context.Context) (*mongo.Client, func()) {
 	return client, cleanup
 }
 
-func TestBatchProcessorPagination(t *testing.T) {
+func TestBatchProcessorRun(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -68,27 +67,12 @@ func TestBatchProcessorPagination(t *testing.T) {
 
 	coll := client.Database("testdb").Collection("items")
 
-	if err := EnsureCreatedAtIndex(ctx, coll); err != nil {
-		t.Fatalf("failed to create index: %v", err)
-	}
-
-	// 350 documents: 250 before cutoff, 100 after
-	cutoff := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
 	var docs []interface{}
-
 	for i := 0; i < 250; i++ {
-		docs = append(docs, Document{
-			ID:        primitive.NewObjectID(),
-			CreatedAt: cutoff.AddDate(0, 0, -(i + 1)),
-			Data:      fmt.Sprintf("before-%d", i),
-		})
-	}
-
-	for i := 0; i < 100; i++ {
-		docs = append(docs, Document{
-			ID:        primitive.NewObjectID(),
-			CreatedAt: cutoff.AddDate(0, 0, i+1),
-			Data:      fmt.Sprintf("after-%d", i),
+		docs = append(docs, bson.M{
+			"_id":       fmt.Sprintf("doc-%d", i),
+			"createdAt": time.Now().UnixMilli(),
+			"data":      fmt.Sprintf("data-%d", i),
 		})
 	}
 
@@ -101,47 +85,33 @@ func TestBatchProcessorPagination(t *testing.T) {
 
 	bp := NewBatchProcessor(coll, 100, mgr)
 
-	var (
-		processedCount atomic.Int32
-		batchCount     atomic.Int32
-		seenIDs        sync.Map
-	)
+	var _claim atomic.Int32
 
-	total, err := bp.ProcessBefore(ctx, cutoff, func(ctx context.Context, batch []Document) error {
-		batchCount.Add(1)
-		for _, doc := range batch {
-			if !doc.CreatedAt.Before(cutoff) {
-				t.Errorf("document %s has createdAt %v >= cutoff %v", doc.ID.Hex(), doc.CreatedAt, cutoff)
-			}
-			if _, loaded := seenIDs.LoadOrStore(doc.ID.Hex(), true); loaded {
-				t.Errorf("duplicate document: %s", doc.ID.Hex())
-			}
-			processedCount.Add(1)
-		}
-		return nil
+	err := bp.Run(ctx, func(doc Document) any {
+		_claim.Add(1)
+		return map[string]string{"tagged": "yes", "docId": doc.ID}
 	})
 
 	if err != nil {
-		t.Fatalf("ProcessBefore failed: %v", err)
+		t.Fatalf("Run failed: %v", err)
 	}
 
-	mgr.Shutdown()
-
-	if total != 250 {
-		t.Errorf("expected 250 documents queued, got %d", total)
+	if p := _claim.Load(); p != 250 {
+		t.Errorf("expected 250 _claim, got %d", p)
 	}
 
-	if processed := processedCount.Load(); processed != 250 {
-		t.Errorf("expected 250 documents processed, got %d", processed)
+	// verify all docs have _claim
+	count, err := coll.CountDocuments(ctx, bson.D{{Key: "_claim", Value: bson.D{{Key: "$exists", Value: true}}}})
+	if err != nil {
+		t.Fatalf("count failed: %v", err)
 	}
 
-	// 3 batches: 100 + 100 + 50
-	if batches := batchCount.Load(); batches != 3 {
-		t.Errorf("expected 3 batches, got %d", batches)
+	if count != 250 {
+		t.Errorf("expected 250 with _claim, got %d", count)
 	}
 }
 
-func TestBatchProcessorConcurrency(t *testing.T) {
+func TestBatchProcessorConcurrentInstances(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -152,17 +122,13 @@ func TestBatchProcessorConcurrency(t *testing.T) {
 
 	coll := client.Database("testdb").Collection("concurrent_items")
 
-	if err := EnsureCreatedAtIndex(ctx, coll); err != nil {
-		t.Fatalf("failed to create index: %v", err)
-	}
-
-	cutoff := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	// insert 500 docs
 	var docs []interface{}
 	for i := 0; i < 500; i++ {
-		docs = append(docs, Document{
-			ID:        primitive.NewObjectID(),
-			CreatedAt: cutoff.AddDate(0, 0, -(i + 1)),
-			Data:      fmt.Sprintf("item-%d", i),
+		docs = append(docs, bson.M{
+			"_id":       fmt.Sprintf("doc-%d", i),
+			"createdAt": time.Now().UnixMilli(),
+			"data":      fmt.Sprintf("data-%d", i),
 		})
 	}
 
@@ -170,47 +136,47 @@ func TestBatchProcessorConcurrency(t *testing.T) {
 		t.Fatalf("failed to insert docs: %v", err)
 	}
 
-	const workers = 3
-	mgr := New(ctx, workers)
+	// run 5 concurrent instances, each with own manager
+	var wg sync.WaitGroup
+	var total_claim atomic.Int32
 
-	bp := NewBatchProcessor(coll, 100, mgr)
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func(instanceID int) {
+			defer wg.Done()
 
-	var (
-		concurrent atomic.Int32
-		maxSeen    atomic.Int32
-	)
+			mgr := New(ctx, 4)
+			defer mgr.Shutdown()
 
-	total, err := bp.ProcessBefore(ctx, cutoff, func(ctx context.Context, batch []Document) error {
-		cur := concurrent.Add(1)
-		defer concurrent.Add(-1)
+			bp := NewBatchProcessor(coll, 100, mgr)
+			bp.Run(ctx, func(doc Document) any {
+				total_claim.Add(1)
+				return map[string]any{
+					"instance": instanceID,
+					"docId":    doc.ID,
+				}
+			})
+		}(i)
+	}
 
-		for {
-			old := maxSeen.Load()
-			if cur <= old || maxSeen.CompareAndSwap(old, cur) {
-				break
-			}
-		}
+	wg.Wait()
 
-		time.Sleep(50 * time.Millisecond)
-		return nil
-	})
-
+	// verify all docs have _claim (exactly once due to atomic filter)
+	count, err := coll.CountDocuments(ctx, bson.D{{Key: "_claim", Value: bson.D{{Key: "$exists", Value: true}}}})
 	if err != nil {
-		t.Fatalf("ProcessBefore failed: %v", err)
+		t.Fatalf("count failed: %v", err)
 	}
 
-	mgr.Shutdown()
-
-	if total != 500 {
-		t.Errorf("expected 500 documents, got %d", total)
+	if count != 500 {
+		t.Errorf("expected 500 with _claim, got %d", count)
 	}
 
-	if max := maxSeen.Load(); max > int32(workers) {
-		t.Errorf("concurrency exceeded limit: got %d, want <= %d", max, workers)
-	}
+	// total _claim may be >= 500 (some wasted work due to races)
+	// but should be close to 500 with jitter helping
+	t.Logf("total processFn calls: %d (ideal: 500)", total_claim.Load())
 }
 
-func TestBatchProcessorCancellation(t *testing.T) {
+func TestBatchProcessorContextCancellation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -221,17 +187,13 @@ func TestBatchProcessorCancellation(t *testing.T) {
 
 	coll := client.Database("testdb").Collection("cancel_items")
 
-	if err := EnsureCreatedAtIndex(ctx, coll); err != nil {
-		t.Fatalf("failed to create index: %v", err)
-	}
-
-	cutoff := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	// insert docs
 	var docs []interface{}
-	for i := 0; i < 500; i++ {
-		docs = append(docs, Document{
-			ID:        primitive.NewObjectID(),
-			CreatedAt: cutoff.AddDate(0, 0, -(i + 1)),
-			Data:      fmt.Sprintf("item-%d", i),
+	for i := 0; i < 1000; i++ {
+		docs = append(docs, bson.M{
+			"_id":       fmt.Sprintf("doc-%d", i),
+			"createdAt": time.Now().UnixMilli(),
+			"data":      fmt.Sprintf("data-%d", i),
 		})
 	}
 
@@ -239,32 +201,38 @@ func TestBatchProcessorCancellation(t *testing.T) {
 		t.Fatalf("failed to insert docs: %v", err)
 	}
 
-	mgrCtx, cancel := context.WithCancel(ctx)
-	mgr := New(mgrCtx, 2)
+	ctx, cancel := context.WithCancel(ctx)
 
-	bp := NewBatchProcessor(coll, 100, mgr)
+	mgr := New(ctx, 4)
+	defer mgr.Shutdown()
 
-	var started atomic.Int32
+	bp := NewBatchProcessor(coll, 50, mgr)
+
+	var _claim atomic.Int32
+	done := make(chan error)
 
 	go func() {
-		bp.ProcessBefore(ctx, cutoff, func(ctx context.Context, docs []Document) error {
-			started.Add(1)
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(5 * time.Second):
-				return nil
-			}
+		done <- bp.Run(ctx, func(doc Document) any {
+			_claim.Add(1)
+			time.Sleep(10 * time.Millisecond) // slow processing
+			return "tagged"
 		})
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	// cancel after a short time
+	time.Sleep(200 * time.Millisecond)
 	cancel()
-	mgr.Wait()
 
-	if s := started.Load(); s >= 5 {
-		t.Errorf("expected fewer than 5 batches to start after cancel, got %d", s)
+	err := <-done
+	if err != context.Canceled {
+		t.Errorf("expected context.Canceled, got %v", err)
 	}
+
+	p := _claim.Load()
+	if p >= 1000 {
+		t.Errorf("expected fewer than 1000 _claim after cancel, got %d", p)
+	}
+	t.Logf("_claim before cancel: %d", p)
 }
 
 func TestBatchProcessorEmptyCollection(t *testing.T) {
@@ -278,29 +246,19 @@ func TestBatchProcessorEmptyCollection(t *testing.T) {
 
 	coll := client.Database("testdb").Collection("empty_items")
 
-	if err := EnsureCreatedAtIndex(ctx, coll); err != nil {
-		t.Fatalf("failed to create index: %v", err)
-	}
-
-	mgr := New(ctx, 2)
+	mgr := New(ctx, 4)
 	defer mgr.Shutdown()
 
 	bp := NewBatchProcessor(coll, 100, mgr)
 
-	cutoff := time.Now()
 	var called atomic.Bool
-
-	total, err := bp.ProcessBefore(ctx, cutoff, func(ctx context.Context, batch []Document) error {
+	err := bp.Run(ctx, func(doc Document) any {
 		called.Store(true)
-		return nil
+		return "tagged"
 	})
 
 	if err != nil {
-		t.Fatalf("ProcessBefore failed: %v", err)
-	}
-
-	if total != 0 {
-		t.Errorf("expected 0 documents, got %d", total)
+		t.Fatalf("Run failed: %v", err)
 	}
 
 	if called.Load() {
@@ -308,7 +266,7 @@ func TestBatchProcessorEmptyCollection(t *testing.T) {
 	}
 }
 
-func TestBatchProcessorSameDateOrdering(t *testing.T) {
+func TestBatchProcessorAlready_claim(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -317,22 +275,16 @@ func TestBatchProcessorSameDateOrdering(t *testing.T) {
 	client, cleanup := setupMongo(t, ctx)
 	defer cleanup()
 
-	coll := client.Database("testdb").Collection("same_date_items")
+	coll := client.Database("testdb").Collection("already__claim")
 
-	if err := EnsureCreatedAtIndex(ctx, coll); err != nil {
-		t.Fatalf("failed to create index: %v", err)
-	}
-
-	// 150 documents with identical createdAt to test _id tiebreaker
-	sameTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
-	cutoff := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
-
+	// insert docs WITH _claim already set
 	var docs []interface{}
-	for i := 0; i < 150; i++ {
-		docs = append(docs, Document{
-			ID:        primitive.NewObjectID(),
-			CreatedAt: sameTime,
-			Data:      fmt.Sprintf("same-date-%d", i),
+	for i := 0; i < 100; i++ {
+		docs = append(docs, bson.M{
+			"_id":       fmt.Sprintf("doc-%d", i),
+			"createdAt": time.Now().UnixMilli(),
+			"data":      fmt.Sprintf("data-%d", i),
+			"_claim":    "already-tagged",
 		})
 	}
 
@@ -340,47 +292,22 @@ func TestBatchProcessorSameDateOrdering(t *testing.T) {
 		t.Fatalf("failed to insert docs: %v", err)
 	}
 
-	mgr := New(ctx, 2)
+	mgr := New(ctx, 4)
 	defer mgr.Shutdown()
 
 	bp := NewBatchProcessor(coll, 100, mgr)
 
-	var (
-		seenIDs sync.Map
-		count   atomic.Int32
-	)
-
-	total, err := bp.ProcessBefore(ctx, cutoff, func(ctx context.Context, batch []Document) error {
-		for _, doc := range batch {
-			if _, loaded := seenIDs.LoadOrStore(doc.ID.Hex(), true); loaded {
-				t.Errorf("duplicate document with same createdAt: %s", doc.ID.Hex())
-			}
-			count.Add(1)
-		}
-		return nil
+	var called atomic.Bool
+	err := bp.Run(ctx, func(doc Document) any {
+		called.Store(true)
+		return "new-tag"
 	})
 
 	if err != nil {
-		t.Fatalf("ProcessBefore failed: %v", err)
+		t.Fatalf("Run failed: %v", err)
 	}
 
-	mgr.Shutdown()
-
-	if total != 150 {
-		t.Errorf("expected 150 documents, got %d", total)
+	if called.Load() {
+		t.Error("processFn should not be called when all docs already have _claim")
 	}
-
-	if c := count.Load(); c != 150 {
-		t.Errorf("expected 150 processed, got %d", c)
-	}
-}
-
-// EnsureCreatedAtIndex creates a descending index on createdAt.
-func EnsureCreatedAtIndex(ctx context.Context, coll *mongo.Collection) error {
-	idx := mongo.IndexModel{
-		Keys:    bson.D{{Key: "createdAt", Value: -1}},
-		Options: options.Index().SetName("idx_createdAt"),
-	}
-	_, err := coll.Indexes().CreateOne(ctx, idx)
-	return err
 }

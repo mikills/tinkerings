@@ -2,29 +2,27 @@ package main
 
 import (
 	"context"
+	"math/rand"
+	"sync"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// Document represents a record with a creation timestamp.
 type Document struct {
-	ID        primitive.ObjectID `bson:"_id,omitempty"`
-	CreatedAt time.Time          `bson:"createdAt"`
-	Data      string             `bson:"data"`
+	ID        string `bson:"_id"`
+	CreatedAt int64  `bson:"createdAt"`
+	Data      string `bson:"data"`
 }
 
-// BatchProcessor handles paginated MongoDB queries with worker dispatch.
 type BatchProcessor struct {
 	collection *mongo.Collection
 	batchSize  int64
 	manager    *Manager
 }
 
-// NewBatchProcessor creates a processor for the given collection.
 func NewBatchProcessor(coll *mongo.Collection, batchSize int, mgr *Manager) *BatchProcessor {
 	if batchSize < 1 {
 		batchSize = 100
@@ -36,89 +34,74 @@ func NewBatchProcessor(coll *mongo.Collection, batchSize int, mgr *Manager) *Bat
 	}
 }
 
-// ProcessFunc is called for each batch of documents.
-type ProcessFunc func(ctx context.Context, docs []Document) error
-
-// ProcessBefore fetches all documents with createdAt < cutoff in batches,
-// submitting each batch to the worker pool via processFn.
-// Returns total documents processed or error.
-func (bp *BatchProcessor) ProcessBefore(ctx context.Context, cutoff time.Time, processFn ProcessFunc) (int, error) {
-	var (
-		total      int
-		lastID     primitive.ObjectID
-		lastTime   time.Time
-		firstBatch = true
-	)
-
-	for {
-		batch, err := bp.fetchBatch(ctx, cutoff, lastTime, lastID, firstBatch)
-		if err != nil {
-			return total, err
-		}
-		if len(batch) == 0 {
-			break
-		}
-
-		firstBatch = false
-		last := batch[len(batch)-1]
-		lastTime = last.CreatedAt
-		lastID = last.ID
-
-		// capture for closure
-		docs := batch
-		submitted := bp.manager.Submit(func(ctx context.Context) error {
-			return processFn(ctx, docs)
-		}, RetryPolicy{MaxAttempts: 1})
-
-		if !submitted {
-			break
-		}
-		total += len(batch)
-
-		if int64(len(batch)) < bp.batchSize {
-			break
-		}
-	}
-
-	return total, nil
+type _claimDoc struct {
+	id     string
+	result any
 }
 
-func (bp *BatchProcessor) fetchBatch(
-	ctx context.Context,
-	cutoff, lastTime time.Time,
-	lastID primitive.ObjectID,
-	firstBatch bool,
-) ([]Document, error) {
-	var filter bson.D
+func (bp *BatchProcessor) Run(ctx context.Context, processFn func(doc Document) any) error {
+	jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
+	time.Sleep(jitter)
 
-	if firstBatch {
-		filter = bson.D{{Key: "createdAt", Value: bson.D{{Key: "$lt", Value: cutoff}}}}
-	} else {
-		// cursor pagination: createdAt < lastTime OR (createdAt == lastTime AND _id < lastID)
-		filter = bson.D{
-			{Key: "$or", Value: bson.A{
-				bson.D{{Key: "createdAt", Value: bson.D{{Key: "$lt", Value: lastTime}}}},
-				bson.D{
-					{Key: "createdAt", Value: lastTime},
-					{Key: "_id", Value: bson.D{{Key: "$lt", Value: lastID}}},
-				},
-			}},
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		cursor, err := bp.collection.Find(ctx,
+			bson.D{{Key: "_claim", Value: bson.D{{Key: "$exists", Value: false}}}},
+			options.Find().SetLimit(bp.batchSize),
+		)
+		if err != nil {
+			return err
+		}
+
+		var docs []Document
+		if err := cursor.All(ctx, &docs); err != nil {
+			cursor.Close(ctx)
+			return err
+		}
+		cursor.Close(ctx)
+
+		if len(docs) == 0 {
+			return nil
+		}
+
+		results := make(chan _claimDoc, len(docs))
+		var wg sync.WaitGroup
+
+		for _, doc := range docs {
+			wg.Add(1)
+			d := doc
+			bp.manager.Submit(func(ctx context.Context) error {
+				defer wg.Done()
+				result := processFn(d)
+				results <- _claimDoc{id: d.ID, result: result}
+				return nil
+			}, RetryPolicy{MaxAttempts: 1})
+		}
+
+		wg.Wait()
+		close(results)
+
+		models := make([]mongo.WriteModel, 0, len(docs))
+		for r := range results {
+			models = append(models, mongo.NewUpdateOneModel().
+				SetFilter(bson.D{
+					{Key: "_id", Value: r.id},
+					{Key: "_claim", Value: bson.D{{Key: "$exists", Value: false}}},
+				}).
+				SetUpdate(bson.D{
+					{Key: "$set", Value: bson.D{{Key: "_claim", Value: r.result}}},
+				}),
+			)
+		}
+
+		_, err = bp.collection.BulkWrite(ctx, models, options.BulkWrite().SetOrdered(false))
+		if err != nil {
+			return err
 		}
 	}
-
-	opts := options.Find().
-		SetSort(bson.D{{Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}).
-		SetLimit(bp.batchSize)
-
-	cursor, err := bp.collection.Find(ctx, filter, opts)
-	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close(ctx)
-
-	var docs []Document
-	if err := cursor.All(ctx, &docs); err != nil {
-		return nil, err
-	}
-	return docs, nil
 }
