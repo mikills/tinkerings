@@ -466,7 +466,7 @@ func TestProxy(t *testing.T) {
 
 		wg.Wait()
 
-		// verify all requests were processed
+		// verify all requests were _claim
 		if atomic.LoadInt32(&requestCount) != numRequests {
 			t.Errorf("expected %d requests, got %d", numRequests, requestCount)
 		}
