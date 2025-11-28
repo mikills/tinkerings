@@ -18,9 +18,10 @@ type Document struct {
 }
 
 type BatchProcessor struct {
-	collection *mongo.Collection
-	batchSize  int64
-	manager    *Manager
+	collection      *mongo.Collection
+	batchSize       int64
+	manager         *Manager
+	createdAtCutoff *int64 // optional cutoff in milliseconds; if nil, no cutoff applied
 }
 
 func NewBatchProcessor(coll *mongo.Collection, batchSize int, mgr *Manager) *BatchProcessor {
@@ -28,10 +29,17 @@ func NewBatchProcessor(coll *mongo.Collection, batchSize int, mgr *Manager) *Bat
 		batchSize = 100
 	}
 	return &BatchProcessor{
-		collection: coll,
-		batchSize:  int64(batchSize),
-		manager:    mgr,
+		collection:      coll,
+		batchSize:       int64(batchSize),
+		manager:         mgr,
+		createdAtCutoff: nil,
 	}
+}
+
+// WithCreatedAtCutoff sets the createdAt cutoff timestamp in milliseconds
+func (bp *BatchProcessor) WithCreatedAtCutoff(cutoff int64) *BatchProcessor {
+	bp.createdAtCutoff = &cutoff
+	return bp
 }
 
 type _claimDoc struct {
@@ -50,8 +58,13 @@ func (bp *BatchProcessor) Run(ctx context.Context, processFn func(doc Document) 
 		default:
 		}
 
+		filter := bson.M{"_claim": bson.M{"$exists": false}}
+		if bp.createdAtCutoff != nil {
+			filter["createdAt"] = bson.M{"$lt": *bp.createdAtCutoff}
+		}
+
 		cursor, err := bp.collection.Find(ctx,
-			bson.D{{Key: "_claim", Value: bson.D{{Key: "$exists", Value: false}}}},
+			filter,
 			options.Find().SetLimit(bp.batchSize),
 		)
 		if err != nil {
@@ -89,12 +102,12 @@ func (bp *BatchProcessor) Run(ctx context.Context, processFn func(doc Document) 
 		models := make([]mongo.WriteModel, 0, len(docs))
 		for r := range results {
 			models = append(models, mongo.NewUpdateOneModel().
-				SetFilter(bson.D{
-					{Key: "_id", Value: r.id},
-					{Key: "_claim", Value: bson.D{{Key: "$exists", Value: false}}},
+				SetFilter(bson.M{
+					"_id":    r.id,
+					"_claim": bson.M{"$exists": false},
 				}).
-				SetUpdate(bson.D{
-					{Key: "$set", Value: bson.D{{Key: "_claim", Value: r.result}}},
+				SetUpdate(bson.M{
+					"$set": bson.M{"_claim": r.result},
 				}),
 			)
 		}
